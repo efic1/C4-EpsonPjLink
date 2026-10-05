@@ -1,0 +1,511 @@
+<devicedata>
+  <copyright>Copyright 2026. MIT License.</copyright>
+  <creator>Efi</creator>
+  <manufacturer>Epson</manufacturer>
+  <name>Epson PJLink Projector</name>
+  <model>PJLink Projector</model>
+  <small>devices_sm/projector_on.gif</small>
+  <large>devices_lg/projector_on.gif</large>
+  <created>10/05/2026 12:00</created>
+  <modified>10/05/2026 12:00</modified>
+  <version>1</version>
+  <control>lua_gen</control>
+  <controlmethod>ip</controlmethod>
+  <driver>DriverWorks</driver>
+
+  <proxies qty="1">
+    <proxy proxybindingid="5001" name="Epson PJLink Projector" primary="True">projector</proxy>
+  </proxies>
+
+  <capabilities>
+    <has_discrete_volume_control>False</has_discrete_volume_control>
+    <has_up_down_volume_control>False</has_up_down_volume_control>
+    <has_discrete_input_select>True</has_discrete_input_select>
+    <has_toad_input_select>False</has_toad_input_select>
+    <has_audio>False</has_audio>
+    <has_discrete_channel_select>False</has_discrete_channel_select>
+    <has_toggle_mute_control>False</has_toggle_mute_control>
+    <has_channel_up_down>False</has_channel_up_down>
+    <has_discrete_mute_control>False</has_discrete_mute_control>
+    <video_provider_count>1</video_provider_count>
+    <video_consumer_count>2</video_consumer_count>
+    <audio_provider_count>0</audio_provider_count>
+    <audio_consumer_count>0</audio_consumer_count>
+  </capabilities>
+
+  <config>
+    <power_command_needed>True</power_command_needed>
+    <power_delay>30</power_delay>
+    <script jit="1" file="driver.lua"/>
+    <documentation file="www/documentation.rtf">Epson PJLink Projector driver. Set the IP Address property (and the PJLink Password if the projector requires one), then use the Test Connection action. See the driver documentation in Composer Pro for details.</documentation>
+
+    <properties>
+      <property>
+        <name>Driver Version</name>
+        <type>STRING</type>
+        <readonly>true</readonly>
+        <default>--</default>
+      </property>
+      <property>
+        <name>IP Address</name>
+        <type>STRING</type>
+        <readonly>false</readonly>
+        <default></default>
+        <tooltip>IPv4 address of the projector (static or DHCP reservation)</tooltip>
+      </property>
+      <property>
+        <name>Control Method</name>
+        <type>LIST</type>
+        <readonly>false</readonly>
+        <default>PJLink</default>
+        <items>
+          <item>PJLink</item>
+          <item>Web (HTTP)</item>
+        </items>
+        <tooltip>PJLink (TCP 4352) is the default. Web (HTTP) uses the projector's Web Control pages on port 80 instead.</tooltip>
+      </property>
+      <property>
+        <name>PJLink Password</name>
+        <type>STRING</type>
+        <password>true</password>
+        <readonly>false</readonly>
+        <default></default>
+        <tooltip>Leave empty if PJLink authentication is disabled on the projector</tooltip>
+      </property>
+      <property>
+        <name>HDMI 1 Input Code</name>
+        <type>STRING</type>
+        <readonly>false</readonly>
+        <default>32</default>
+        <tooltip>PJLink code for the HDMI 1 input (Epson EH-LS12000B: 32). Use the Read Input List action to see what your projector supports.</tooltip>
+      </property>
+      <property>
+        <name>HDMI 2 Input Code</name>
+        <type>STRING</type>
+        <readonly>false</readonly>
+        <default>33</default>
+        <tooltip>PJLink code for the HDMI 2 input (Epson EH-LS12000B: 33)</tooltip>
+      </property>
+      <property>
+        <name>Web Control Password</name>
+        <type>STRING</type>
+        <password>true</password>
+        <readonly>false</readonly>
+        <default></default>
+        <tooltip>Web method only. The projector's Web Control Password (user EPSONWEB). Used for status queries.</tooltip>
+      </property>
+      <property>
+        <name>Remote Password</name>
+        <type>STRING</type>
+        <password>true</password>
+        <readonly>false</readonly>
+        <default></default>
+        <tooltip>Web method only. The Basic Control Remote Password (user EPSONREMOTE). Used by the Basic Control command path.</tooltip>
+      </property>
+      <property>
+        <name>Web Command Path</name>
+        <type>LIST</type>
+        <readonly>false</readonly>
+        <default>/cgi-bin/Remote/directsend</default>
+        <items>
+          <item>/cgi-bin/Remote/directsend</item>
+          <item>/cgi-bin/directsend</item>
+        </items>
+        <tooltip>Web method only. Where commands are sent. The first (Basic Control) matches the projector's own Basic Control page.</tooltip>
+      </property>
+      <property>
+        <name>Power On Request</name>
+        <type>STRING</type>
+        <readonly>false</readonly>
+        <default>IMPWR=ON</default>
+        <tooltip>Web method only. directsend parameter that switches the projector on.</tooltip>
+      </property>
+      <property>
+        <name>Power Off Key</name>
+        <type>STRING</type>
+        <readonly>false</readonly>
+        <default>6C</default>
+        <tooltip>Web method only. Remote key code sent as KEY=xx to switch the projector off.</tooltip>
+      </property>
+      <property>
+        <name>Power Off Key Presses</name>
+        <type>RANGED_INTEGER</type>
+        <minimum>1</minimum>
+        <maximum>3</maximum>
+        <readonly>false</readonly>
+        <default>1</default>
+        <tooltip>Web method only. Use 2 if the projector shows a confirmation screen before switching off.</tooltip>
+      </property>
+      <property>
+        <name>HDMI 1 Web Source Code</name>
+        <type>STRING</type>
+        <readonly>false</readonly>
+        <default>30</default>
+        <tooltip>Web method only. ESC/VP21 SOURCE code reported while HDMI 1 is selected (Epson: 30).</tooltip>
+      </property>
+      <property>
+        <name>HDMI 2 Web Source Code</name>
+        <type>STRING</type>
+        <readonly>false</readonly>
+        <default>A0</default>
+        <tooltip>Web method only. ESC/VP21 SOURCE code reported while HDMI 2 is selected (Epson: A0).</tooltip>
+      </property>
+      <property>
+        <name>HDMI 1 Select Request</name>
+        <type>STRING</type>
+        <readonly>false</readonly>
+        <default></default>
+        <tooltip>Web method only. directsend parameter that selects HDMI 1, for example KEY=xx. Empty means input switching is not configured. Find the value with the Send Web Request action.</tooltip>
+      </property>
+      <property>
+        <name>HDMI 2 Select Request</name>
+        <type>STRING</type>
+        <readonly>false</readonly>
+        <default></default>
+        <tooltip>Web method only. directsend parameter that selects HDMI 2. The LS12000B remote has one HDMI1/HDMI2 key that toggles, so this is often the same value as HDMI 1 Select Request.</tooltip>
+      </property>
+      <property>
+        <name>Idle Polling Interval (seconds)</name>
+        <type>RANGED_INTEGER</type>
+        <minimum>10</minimum>
+        <maximum>600</maximum>
+        <readonly>false</readonly>
+        <default>30</default>
+        <tooltip>How often to check the projector while nothing is changing. Polls speed up automatically during warm-up, cool-down and commands.</tooltip>
+      </property>
+      <property>
+        <name>Request Timeout (seconds)</name>
+        <type>RANGED_INTEGER</type>
+        <minimum>2</minimum>
+        <maximum>30</maximum>
+        <readonly>false</readonly>
+        <default>5</default>
+      </property>
+      <property>
+        <name>Light Source Hours Alert</name>
+        <type>RANGED_INTEGER</type>
+        <minimum>0</minimum>
+        <maximum>100000</maximum>
+        <readonly>false</readonly>
+        <default>0</default>
+        <tooltip>Fire the Light Source Hours Alert event when the hours reach this value. 0 disables the alert.</tooltip>
+      </property>
+      <property>
+        <name>Debug Mode</name>
+        <type>LIST</type>
+        <readonly>false</readonly>
+        <default>Off</default>
+        <items>
+          <item>Off</item>
+          <item>Print</item>
+          <item>Log</item>
+        </items>
+      </property>
+      <property>
+        <name>Connection Status</name>
+        <type>STRING</type>
+        <readonly>true</readonly>
+        <default>Not configured</default>
+      </property>
+      <property>
+        <name>Power State</name>
+        <type>STRING</type>
+        <readonly>true</readonly>
+        <default>Unknown</default>
+      </property>
+      <property>
+        <name>Current Input</name>
+        <type>STRING</type>
+        <readonly>true</readonly>
+        <default>Unknown</default>
+      </property>
+      <property>
+        <name>Fault Status</name>
+        <type>STRING</type>
+        <readonly>true</readonly>
+        <default>Unknown</default>
+      </property>
+      <property>
+        <name>Light Source Hours</name>
+        <type>STRING</type>
+        <readonly>true</readonly>
+        <default>Unknown</default>
+      </property>
+      <property>
+        <name>Projector Model</name>
+        <type>STRING</type>
+        <readonly>true</readonly>
+        <default>Unknown</default>
+      </property>
+      <property>
+        <name>Available Inputs</name>
+        <type>STRING</type>
+        <readonly>true</readonly>
+        <default>Run the Read Input List action</default>
+      </property>
+      <property>
+        <name>Last Test Result</name>
+        <type>STRING</type>
+        <readonly>true</readonly>
+        <default>Not run</default>
+      </property>
+    </properties>
+
+    <actions>
+      <action>
+        <name>Power On</name>
+        <command>PowerOn</command>
+        <sort_order>0</sort_order>
+      </action>
+      <action>
+        <name>Power Off</name>
+        <command>PowerOff</command>
+        <sort_order>1</sort_order>
+      </action>
+      <action>
+        <name>Select Input</name>
+        <command>SelectInput</command>
+        <sort_order>2</sort_order>
+        <params>
+          <param>
+            <name>Input</name>
+            <type>LIST</type>
+            <items>
+              <item>HDMI 1</item>
+              <item>HDMI 2</item>
+            </items>
+          </param>
+        </params>
+      </action>
+      <action>
+        <name>Poll Now</name>
+        <command>PollNow</command>
+        <sort_order>3</sort_order>
+      </action>
+      <action>
+        <name>Test Connection</name>
+        <command>TestConnection</command>
+        <sort_order>4</sort_order>
+      </action>
+      <action>
+        <name>Read Input List</name>
+        <command>ReadInputList</command>
+        <sort_order>5</sort_order>
+      </action>
+      <action>
+        <name>Send Web Request</name>
+        <command>SendWebRequest</command>
+        <sort_order>6</sort_order>
+        <params>
+          <param>
+            <name>Request</name>
+            <type>STRING</type>
+          </param>
+        </params>
+      </action>
+      <action>
+        <name>Query Web Value</name>
+        <command>QueryWebValue</command>
+        <sort_order>7</sort_order>
+        <params>
+          <param>
+            <name>Query</name>
+            <type>STRING</type>
+          </param>
+        </params>
+      </action>
+      <action>
+        <name>Reset Connection</name>
+        <command>ResetConnection</command>
+        <sort_order>8</sort_order>
+      </action>
+    </actions>
+
+    <commands>
+      <command>
+        <name>Select Input Code</name>
+        <description>Select PJLink input code PARAM1 on NAME</description>
+        <sort_order>0</sort_order>
+        <params>
+          <param>
+            <name>Code</name>
+            <type>STRING</type>
+          </param>
+        </params>
+      </command>
+    </commands>
+
+    <conditionals>
+      <conditional>
+        <id>0</id>
+        <name>POWER_STATE</name>
+        <type>LIST</type>
+        <condition_statement>Power state</condition_statement>
+        <description>NAME power state is LOGIC STRING</description>
+        <items>
+          <item>On</item>
+          <item>Standby</item>
+          <item>Warming Up</item>
+          <item>Cooling Down</item>
+          <item>Offline</item>
+        </items>
+      </conditional>
+      <conditional>
+        <id>1</id>
+        <name>CURRENT_INPUT</name>
+        <type>LIST</type>
+        <condition_statement>Current input</condition_statement>
+        <description>NAME input is LOGIC STRING</description>
+        <items>
+          <item>HDMI 1</item>
+          <item>HDMI 2</item>
+          <item>Other</item>
+        </items>
+      </conditional>
+      <conditional>
+        <id>2</id>
+        <name>FAULT_ACTIVE</name>
+        <type>BOOL</type>
+        <condition_statement>Projector fault</condition_statement>
+        <description>NAME fault status is STRING</description>
+        <true_text>Active</true_text>
+        <false_text>None</false_text>
+      </conditional>
+      <conditional>
+        <id>3</id>
+        <name>LIGHT_SOURCE_HOURS</name>
+        <type>NUMBER</type>
+        <condition_statement>Light source hours</condition_statement>
+        <description>NAME light source hours is LOGIC INTEGER</description>
+        <minimum>0</minimum>
+        <maximum>100000</maximum>
+      </conditional>
+    </conditionals>
+  </config>
+
+  <events>
+    <event>
+      <id>1</id>
+      <name>Projector Powered On</name>
+      <description>When NAME has finished warming up and is on</description>
+      <sort_order>0</sort_order>
+    </event>
+    <event>
+      <id>2</id>
+      <name>Projector Powered Off</name>
+      <description>When NAME has finished cooling down and is in standby</description>
+      <sort_order>1</sort_order>
+    </event>
+    <event>
+      <id>3</id>
+      <name>Projector Warming Up</name>
+      <description>When NAME starts warming up</description>
+      <sort_order>2</sort_order>
+    </event>
+    <event>
+      <id>4</id>
+      <name>Projector Cooling Down</name>
+      <description>When NAME starts cooling down</description>
+      <sort_order>3</sort_order>
+    </event>
+    <event>
+      <id>5</id>
+      <name>Input Changed</name>
+      <description>When the input on NAME changes</description>
+      <sort_order>4</sort_order>
+    </event>
+    <event>
+      <id>6</id>
+      <name>Projector Fault</name>
+      <description>When NAME reports a fault or warning</description>
+      <sort_order>5</sort_order>
+    </event>
+    <event>
+      <id>7</id>
+      <name>Projector Fault Cleared</name>
+      <description>When NAME no longer reports a fault</description>
+      <sort_order>6</sort_order>
+    </event>
+    <event>
+      <id>8</id>
+      <name>Connection Lost</name>
+      <description>When communication with NAME is lost</description>
+      <sort_order>7</sort_order>
+    </event>
+    <event>
+      <id>9</id>
+      <name>Connection Restored</name>
+      <description>When communication with NAME is restored</description>
+      <sort_order>8</sort_order>
+    </event>
+    <event>
+      <id>10</id>
+      <name>Light Source Hours Alert</name>
+      <description>When the light source hours on NAME reach the alert threshold</description>
+      <sort_order>9</sort_order>
+    </event>
+  </events>
+
+  <connections>
+    <connection>
+      <id>5001</id>
+      <facing>6</facing>
+      <connectionname>TV</connectionname>
+      <type>2</type>
+      <consumer>False</consumer>
+      <audiosource>False</audiosource>
+      <videosource>False</videosource>
+      <linelevel>False</linelevel>
+      <classes>
+        <class>
+          <classname>TV</classname>
+        </class>
+      </classes>
+    </connection>
+    <connection proxybindingid="5001">
+      <id>7000</id>
+      <facing>6</facing>
+      <connectionname>Room Selection - Output</connectionname>
+      <type>7</type>
+      <consumer>False</consumer>
+      <audiosource>False</audiosource>
+      <videosource>True</videosource>
+      <linelevel>True</linelevel>
+      <classes>
+        <class>
+          <classname>VIDEO_SELECTION</classname>
+        </class>
+      </classes>
+    </connection>
+    <connection proxybindingid="5001">
+      <id>1021</id>
+      <facing>6</facing>
+      <connectionname>HDMI 1</connectionname>
+      <type>5</type>
+      <consumer>True</consumer>
+      <audiosource>False</audiosource>
+      <videosource>False</videosource>
+      <linelevel>True</linelevel>
+      <classes>
+        <class>
+          <classname>HDMI</classname>
+        </class>
+      </classes>
+    </connection>
+    <connection proxybindingid="5001">
+      <id>1022</id>
+      <facing>6</facing>
+      <connectionname>HDMI 2</connectionname>
+      <type>5</type>
+      <consumer>True</consumer>
+      <audiosource>False</audiosource>
+      <videosource>False</videosource>
+      <linelevel>True</linelevel>
+      <classes>
+        <class>
+          <classname>HDMI</classname>
+        </class>
+      </classes>
+    </connection>
+  </connections>
+</devicedata>

@@ -1,0 +1,10 @@
+<Driver type="c4z" name="epson_pjlink" squishLua="false">
+  <Items>
+    <Item type="dir" name="www" recurse="true"/>
+    <Item type="dir" name="lib" recurse="true"/>
+    <Item type="file" name="driver.xml"/>
+    <Item type="file" name="driver.lua"/>
+    <Item type="dir" name="tests" exclude="true"/>
+    <Item type="dir" name="tools" exclude="true"/>
+  </Items>
+</Driver>
