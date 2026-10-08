@@ -240,8 +240,11 @@ function Client:_fetch(path, query, cb, attempt)
   local port = (self.port ~= 80) and (":" .. self.port) or ""
   local url = "http://" .. self.host .. port .. target
   local timeout = self.timeout
+  local generation = self.generation or 0
 
   self.env.get(url, headers, timeout, function(r)
+    -- reset() while this was in flight: nothing may follow (no retry, no next key press)
+    if (self.generation or 0) ~= generation then return end
     if r.err then return cb(r) end
 
     if r.code == 401 then

@@ -433,3 +433,34 @@ t.test("the whole flow works with both passwords set", function()
   t.deep_eq(s.states(), { "STANDBY", "WARMING", "ON" })
   t.falsy(s.projector.auth_failed)
 end)
+
+t.suite("http client: review fixes")
+
+local function directsend_count(s)
+  local n = 0
+  for _, line in ipairs(s.sim.log) do
+    if line:find("directsend", 1, true) then n = n + 1 end
+  end
+  return n
+end
+
+t.test("reset() during a multi-press power-off stops the remaining presses", function()
+  local s = S.new_stack({ sim = { power = "01", off_presses = 2 }, cfg = { power_off_presses = 2 } })
+  local r = capture()
+  s.client:request("POWR", "0", r.cb)
+  s.clock:advance(5) -- first press in flight
+  s.client:reset("CANCELLED")
+  t.eq(r.res.err, "CANCELLED")
+  s.clock:advance(5 * SEC)
+  t.eq(directsend_count(s), 1, "second key press must not go out after reset")
+  t.eq(r.calls, 1)
+end)
+
+t.test("multi-press power-off still sends every press when not reset", function()
+  local s = S.new_stack({ sim = { power = "01", off_presses = 2 }, cfg = { power_off_presses = 2 } })
+  local r = capture()
+  s.client:request("POWR", "0", r.cb)
+  s.clock:advance(5 * SEC)
+  t.truthy(r.res.ok)
+  t.eq(directsend_count(s), 2)
+end)

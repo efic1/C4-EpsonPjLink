@@ -441,11 +441,11 @@ function OnPropertyChanged(property)
 end
 
 function OnConnectionStatusChanged(idBinding, nPort, strStatus)
-  if idBinding == NET_ID and gClient then gClient:on_status(strStatus) end
+  if idBinding == NET_ID and gClient and gClient.on_status then gClient:on_status(strStatus) end
 end
 
 function ReceivedFromNetwork(idBinding, nPort, strData)
-  if idBinding == NET_ID and gClient then gClient:on_data(strData) end
+  if idBinding == NET_ID and gClient and gClient.on_data then gClient:on_data(strData) end
 end
 
 function ReceivedFromProxy(idBinding, strCommand, tParams)
