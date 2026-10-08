@@ -1,6 +1,6 @@
 # Epson PJLink Projector
 
-Version 1.0.0 - Control4 OS 3.x and later (written against 3.4.x). Defaults are set for the Epson EH-LS12000B / Pro Cinema LS12000B.
+Version 1.0.1 - Control4 OS 3.x and later (written against 3.4.x). Defaults are set for the Epson EH-LS12000B / Pro Cinema LS12000B.
 
 ## Overview
 
@@ -240,4 +240,5 @@ While stable, each poll also reads the input and faults. Light source hours are 
 
 | Version | Notes |
 |---|---|
+| 1.0.1 | Fixes from code review: no errors from stray network events in Web mode; clean reconnect after a reset or connect timeout (no spurious CONNECT failure, no leftover socket); INF2 asked once per connection; no input flicker after a slow input switch; a reset cancels remaining power-off key presses in Web mode. |
 | 1.0.0 | First release. |
