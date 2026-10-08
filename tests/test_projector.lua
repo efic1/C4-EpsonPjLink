@@ -434,3 +434,52 @@ t.test("configure ignores unknown keys and non-numbers", function()
   t.eq(s.projector.cfg.fast_interval, 3)
   t.eq(s.projector.cfg.bogus, nil)
 end)
+
+t.suite("projector: review fixes")
+
+t.test("a projector that rejects INF2 is asked once, not on every poll", function()
+  local s = H.new_stack({ sim = { power = "0" }, config = { idle_interval = 30 } })
+  local orig = getmetatable(s.sim)._handle
+  s.sim._handle = function(self, body, param)
+    if body == "INF2" then return "ERR2" end
+    return orig(self, body, param)
+  end
+  s.projector:start()
+  s.clock:advance(300 * SEC)
+  t.truthy(s.sim:count("POWR ?") >= 8)
+  t.eq(s.sim:count("INF2 ?"), 1)
+end)
+
+t.test("a slow input switch does not flicker back to the old input", function()
+  local s = H.new_stack({ sim = { power = "1", input = "32" } })
+  local orig = getmetatable(s.sim)._handle
+  s.sim._handle = function(self, body, param)
+    if body == "INPT" and param ~= "?" and self.power == "1" then
+      self:_after(5 * SEC, function() self.input = param end) -- applied late
+      return "OK"
+    end
+    return orig(self, body, param)
+  end
+  s.projector:start()
+  s.clock:advance(10 * SEC)
+  s.projector:select_input("33")
+  s.clock:advance(30 * SEC)
+  local seen = {}
+  for _, e in ipairs(s.of("input")) do seen[#seen + 1] = e[1] end
+  t.deep_eq(seen, { "32", "33" })
+  t.eq(s.projector.input, "33")
+end)
+
+t.test("if the switch really failed, the real input is reported after the window", function()
+  local s = H.new_stack({ sim = { power = "1", input = "32" } })
+  local orig = getmetatable(s.sim)._handle
+  s.sim._handle = function(self, body, param)
+    if body == "INPT" and param ~= "?" and self.power == "1" then return "OK" end -- never applied
+    return orig(self, body, param)
+  end
+  s.projector:start()
+  s.clock:advance(10 * SEC)
+  s.projector:select_input("33")
+  s.clock:advance(30 * SEC)
+  t.eq(s.projector.input, "32")
+end)

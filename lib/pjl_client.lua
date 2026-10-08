@@ -142,10 +142,17 @@ function Client:reset(reason)
   self:_disarm()
   local dropped = self.queue
   self.queue = {}
-  if self.online then self.env.disconnect() end
-  self.online = false
-  self.state = "idle"
+  local s = self.state
   self.buffer = ""
+  if self.online or s == "connecting" or s == "greeting" or s == "awaiting" or s == "closing" then
+    -- A socket (or a pending connect) may still exist. Wait for its OFFLINE
+    -- before the next request, so that event cannot be mistaken for the next
+    -- connection failing.
+    self:_force_close()
+  else
+    self.online = false
+    self.state = "idle"
+  end
   for _, job in ipairs(dropped) do
     for _, cb in ipairs(job.cbs) do
       local ok, err = pcall(cb, { ok = false, err = reason or "CANCELLED" })
@@ -164,9 +171,12 @@ function Client:on_status(status)
       self:_arm(self.response_timeout, function()
         self:_finish({ ok = false, err = "TIMEOUT" })
       end)
-    elseif self.state == "closing" or self.state == "settling" then
+    elseif self.state == "closing" then
       -- A late connect completed after we gave up on it: close it again.
       self.env.disconnect()
+    elseif self.state == "settling" or self.state == "idle" then
+      -- Same, but we had already moved on: close it and wait for the OFFLINE.
+      self:_force_close()
     end
   else
     self.online = false
@@ -204,7 +214,8 @@ function Client:_pump()
   self.buffer = ""
   self.online = false
   self:_arm(self.connect_timeout, function()
-    self:_finish({ ok = false, err = "CONNECT" })
+    -- the connect may still complete later: cancel it and wait for the close
+    self:_finish({ ok = false, err = "CONNECT" }, true)
   end)
   self.env.connect(self.host, self.port)
 end
@@ -252,7 +263,17 @@ function Client:_on_line(line)
   end
 end
 
-function Client:_finish(res)
+--- Close the socket (or cancel a pending connect) and hold off new work until
+-- the owner reports OFFLINE, or close_timeout passes.
+function Client:_force_close()
+  self:_disarm()
+  self.online = true
+  self.state = "closing"
+  self.env.disconnect()
+  self:_arm(self.close_timeout, function() self:_closed() end)
+end
+
+function Client:_finish(res, force_close)
   if self.state == "idle" or self.state == "closing" or self.state == "settling" then
     return
   end
@@ -260,7 +281,8 @@ function Client:_finish(res)
   self:_disarm()
   self.state = "closing"
 
-  if self.online then
+  if self.online or force_close then
+    self.online = true
     self.env.disconnect()
     self:_arm(self.close_timeout, function() self:_closed() end)
   else

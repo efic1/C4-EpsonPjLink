@@ -58,6 +58,8 @@ function Projector.new(deps)
   self.lamp_alerted = false
   self.lamp_checked_at = nil
   self.model = nil
+  self.model_asked = false  -- INF2 is asked once per connection, not on every poll
+  self.input_expect = nil   -- { code, expires }: ignore stale input readbacks after a switch
 
   self.link = nil        -- nil unknown, true up, false down
   self.fail_count = 0
@@ -121,6 +123,7 @@ function Projector:_set_state(new)
     -- The picture path is gone: forget the input so the next power-on
     -- re-reads and re-announces it (without raising a Changed event).
     self.input = nil
+    self.input_expect = nil
   end
   self:_emit("state", new, prev_real)
 end
@@ -131,6 +134,7 @@ function Projector:_link_up()
   if self.link ~= true then
     local was = self.link
     self.link = true
+    self.model_asked = false
     self:_emit("status", "Connected")
     self:_emit("link", true, was)
   end
@@ -252,7 +256,10 @@ function Projector:_followups(done)
   end
   if st == "ON" or st == "STANDBY" then
     steps[#steps + 1] = { "ERST", self._on_erst }
-    if not self.model then steps[#steps + 1] = { "INF2", self._on_info } end
+    if not self.model and not self.model_asked then
+      self.model_asked = true
+      steps[#steps + 1] = { "INF2", self._on_info }
+    end
   end
 
   local i = 0
@@ -274,6 +281,14 @@ end
 
 function Projector:_on_input(value)
   if type(value) ~= "string" or value == "" then return end
+  local e = self.input_expect
+  if e then
+    if value == e.code or self.deps.now() >= e.expires then
+      self.input_expect = nil
+    else
+      return -- stale reading: the projector has not finished switching
+    end
+  end
   if value ~= self.input then
     local prev = self.input
     self.input = value
@@ -415,6 +430,7 @@ function Projector:_send_input(code)
     self.cmd_at = self.deps.now()
     if res.ok then
       self.want.input = nil
+      self.input_expect = { code = code, expires = self.cmd_at + self.cfg.expect_window }
       if code ~= self.input then
         local prev = self.input
         self.input = code
