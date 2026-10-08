@@ -7,8 +7,8 @@
   <small>devices_sm/projector_on.gif</small>
   <large>devices_lg/projector_on.gif</large>
   <created>10/05/2026 12:00</created>
-  <modified>10/05/2026 12:00</modified>
-  <version>1</version>
+  <modified>10/08/2026 09:00</modified>
+  <version>2</version>
   <control>lua_gen</control>
   <controlmethod>ip</controlmethod>
   <driver>DriverWorks</driver>
