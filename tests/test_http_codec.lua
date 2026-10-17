@@ -109,6 +109,13 @@ t.test("power off sends the standby key once, or as many times as configured (1-
   t.deep_eq(cmds.plan("POWR", "0", {}).commands, { "KEY=6C" })
 end)
 
+t.test("a configured Power Off Request wins over the key press and is sent once", function()
+  t.deep_eq(cmds.plan("POWR", "0", { power_off = "IMPWR=OFF", power_off_key = "6C", power_off_presses = 3 }).commands,
+    { "IMPWR=OFF" })
+  t.deep_eq(cmds.plan("POWR", "0", { power_off = "  IMPWR=OFF " }).commands, { "IMPWR=OFF" })
+  t.deep_eq(cmds.plan("POWR", "0", { power_off = "" }).commands, { "KEY=6C" })
+end)
+
 t.test("input query returns the upper-cased source code; select looks up the configured command", function()
   local q = cmds.plan("INPT", "?", CFG)
   t.eq(q.query, "SOURCE?")

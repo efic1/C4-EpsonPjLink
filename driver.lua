@@ -13,7 +13,7 @@ local Client = require "lib.pjl_client"
 local EpsonHttp = require "lib.epson_http"
 local Projector = require "lib.pjl_projector"
 
-DRIVER_VERSION = "1.0.2"
+DRIVER_VERSION = "1.0.3"
 
 local PROXY_ID = 5001
 local NET_ID = 6001
@@ -349,6 +349,7 @@ local function web_cfg()
   end
   return {
     power_on = trim(Properties["Power On Request"]),
+    power_off = trim(Properties["Power Off Request"]),
     power_off_key = trim(Properties["Power Off Key"]),
     power_off_presses = tonumber(Properties["Power Off Key Presses"]) or 1,
     inputs = requests,

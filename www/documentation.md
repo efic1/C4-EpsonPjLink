@@ -53,7 +53,7 @@ Use PJLink unless you have a reason not to. Use Web (HTTP) if PJLink does not an
 3. Basic Control must be switched on in the projector (Network > Network Settings > Projector Control > **Basic Control = On**) for the default **Web Command Path** (`/cgi-bin/Remote/directsend`) to work. The other path, `/cgi-bin/directsend`, uses the Web Control password instead.
 4. **Standby Mode = Communication On** is needed here too, otherwise the web server is not reachable in standby.
 5. Run **Test Connection**. **Last Test Result** should report the power state.
-6. **Power on and off** work with the defaults (`IMPWR=ON` and key `6C`, as captured from an EH-LS12000B's Basic Control page). If the projector shows a confirmation screen before switching off, set **Power Off Key Presses** to 2.
+6. **Power on and off** work with the defaults (`IMPWR=ON` and `IMPWR=OFF`, both verified on an EH-LS12000B). Off is a discrete request, not the remote's power key, which toggles. Only if your model rejects `IMPWR=OFF`, empty **Power Off Request** to fall back to the key (`6C`); then set **Power Off Key Presses** to 2 if the projector shows a confirmation screen.
 7. **Input selection needs one-time set-up.** The projector reports its input over the web (HDMI 1 = `30`, HDMI 2 = `A0`), so the driver shows the current input without any set-up. To *change* input, it needs the remote key your model uses:
    1. Open the projector's Basic Control page in a browser with the developer tools Network tab open.
    2. Click the HDMI button and note the request (for example `directsend?KEY=xx`).
@@ -87,8 +87,9 @@ Until the select requests are set, input changes are ignored (and logged); every
 | Remote Password | empty | Web method. Password for user EPSONREMOTE (Basic Control commands). |
 | Web Command Path | /cgi-bin/Remote/directsend | Web method. Where commands are sent. |
 | Power On Request | IMPWR=ON | Web method. directsend parameter that switches on. |
-| Power Off Key | 6C | Web method. Remote key sent as `KEY=xx` to switch off. |
-| Power Off Key Presses | 1 | Web method. Use 2 if a confirmation screen appears. |
+| Power Off Request | IMPWR=OFF | Web method. `directsend` parameter that switches off. Not a toggle, so it never switches a standby projector on. Empty means use Power Off Key instead. |
+| Power Off Key | 6C | Web method, only when Power Off Request is empty. Remote key sent as `KEY=xx`. The key toggles: in standby it switches the projector on. |
+| Power Off Key Presses | 1 | Web method, only when Power Off Request is empty. Use 2 if a confirmation screen appears. |
 | HDMI 1 Web Source Code | 30 | Web method. Source code reported for HDMI 1. |
 | HDMI 2 Web Source Code | A0 | Web method. Source code reported for HDMI 2. |
 | HDMI 1 Select Request | empty | Web method. Request that selects HDMI 1 (for example `KEY=xx`). |

@@ -70,7 +70,7 @@ local function conv_raw(reply)
 end
 
 --- Decide what to do for a request.
--- @param cfg { power_on, power_off_key, power_off_presses, inputs = {[code]=cmd},
+-- @param cfg { power_on, power_off, power_off_key, power_off_presses, inputs = {[code]=cmd},
 --              source_codes = {code,...}, model }
 -- @return plan:
 --   { kind="query", query="PWR?", convert=fn }
@@ -87,6 +87,12 @@ function M.plan(body, param, cfg)
     elseif param == "1" then
       return { kind = "send", commands = { trim(cfg.power_on) ~= "" and trim(cfg.power_on) or "IMPWR=ON" } }
     elseif param == "0" then
+      -- A discrete off request (IMPWR=OFF) is not a toggle, so it is safe to repeat.
+      -- Only when it is empty do we fall back to the remote's power key, which toggles.
+      local off = trim(cfg.power_off)
+      if off ~= "" then
+        return { kind = "send", commands = { off } }
+      end
       local key = trim(cfg.power_off_key)
       if key == "" then key = "6C" end
       local presses = tonumber(cfg.power_off_presses) or 1

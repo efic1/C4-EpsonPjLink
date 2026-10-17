@@ -133,6 +133,9 @@ function S:_directsend(query)
 
   if param == "IMPWR=ON" then
     if self.power == "04" then self:_set_power("02", self.warm_ms, "01") end
+  elseif param == "IMPWR=OFF" then
+    -- discrete off: only acts when the projector is on, never wakes a standby projector
+    if self.power == "01" then self:_set_power("03", self.cool_ms, "04") end
   elseif param == "KEY=6C" then
     if self.power == "01" then
       if self.off_presses >= 2 then

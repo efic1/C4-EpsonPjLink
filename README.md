@@ -115,14 +115,17 @@ or projector. Check these on site:
 
 Verified against an EH-LS12000B (from captures you provided): the status query
 `json_query?jsoncallback=PWR?` with Digest auth and a Referer header, and the Basic Control
-requests `directsend?IMPWR=ON` and `directsend?KEY=6C`. Everything else is from Epson's
+requests `directsend?IMPWR=ON` and `directsend?KEY=6C`, plus `directsend?IMPWR=OFF` (tried
+by hand on the same unit). Everything else is from Epson's
 ESC/VP21 documentation or is configurable:
 
 - `SOURCE?` replies `30` / `A0` for HDMI1 / HDMI2 (Epson's ESC/VP21 list), and `ERR?` / `LAMP?`
   are assumed to work through `json_query` like any other ESC/VP21 query.
 - The remote key that selects an input is not known; it is a property, empty by default.
-- Whether one `KEY=6C` shuts the projector down, or a confirmation press is needed, is
-  not known; `Power Off Key Presses` covers both.
+- Power off uses `directsend?IMPWR=OFF` by default, confirmed working on an EH-LS12000B.
+  It is a discrete request, unlike the remote's power key (`KEY=6C`), which toggles and
+  would switch a standby projector back on. The key remains as a fallback when
+  `Power Off Request` is emptied; `Power Off Key Presses` covers a confirmation screen.
 - Which command path (`/cgi-bin/Remote/directsend` or `/cgi-bin/directsend`) a given
   firmware accepts, and which password each one wants, is selectable.
 
