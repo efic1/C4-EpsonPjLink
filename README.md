@@ -109,36 +109,35 @@ or projector, so this section separates what has been seen on hardware from what
   IP-change, stray-greeting and Last Error fixes, which have not been tried on the unit yet.
 - **Web method:** `json_query?jsoncallback=PWR?` with Digest auth and a Referer header,
   `directsend?IMPWR=ON` and `directsend?IMPWR=OFF`, and the `KEY=6C` power key.
+- **Proxy structure and installation:** the driver installs and runs in a live Control4
+  system, and the projector proxy (type `projector`, connection class `TV`, input bindings
+  1021/1022, room-selection 7000) works there. The IDs follow Control4's own Sanyo
+  PLC-WXE45 and certified Epson LS12000B drivers; input changes are announced for both the
+  video binding and its audio twin, as that driver documents is required for video-only
+  inputs.
 - **Logging:** log lines appear in Composer Pro's Lua output with Log Level and Log Output
   (debug logs from the unit were used to find the 1.0.5 fix).
 
 ### Not verified: check on site
 
-1. **Proxy structure.** Modelled on Control4's own Sanyo PLC-WXE45 and certified Epson LS12000B drivers:
-   proxy type `projector`, proxy connection class `TV` (type 2), input bindings
-   1021/1022 and room-selection 7000 (the same IDs as Control4's certified Epson LS12000B
-   driver, whose 7000 also carries `VIDEO_SELECTION` only). Inputs are matched on
-   `binding % 1000`, and input changes are announced for both the video binding and its
-   audio twin, as that driver documents is required for video-only inputs. If Composer will not offer the projector as a room's video
-   device, compare that binding against a Control4 projector driver.
-2. **Input codes.** Defaults are Epson's documented `32` (HDMI 1) and `33` (HDMI 2) for the
+1. **Input codes.** Defaults are Epson's documented `32` (HDMI 1) and `33` (HDMI 2) for the
    EH-LS12000B (User's Guide, "PJLink Support"). Use the
    *Read Input List* action and correct the properties if your model differs.
-3. **Changing the IP while running.** The first connection is confirmed, but changing the
+2. **Changing the IP while running.** The first connection is confirmed, but changing the
    address calls `C4:CreateNetworkConnection` again on binding 6001 and resets the link.
    The tests cover the driver's side; confirm on the controller that Director picks up the
    new address, and restart the driver if it does not. (The binding is created at runtime
    and is not declared in `driver.xml`; it works in practice, but this is not documented
    Control4 behaviour.)
-4. **Timing under load.** Timers (`C4:SetTimer`) and the order in which Control4 delivers
+3. **Timing under load.** Timers (`C4:SetTimer`) and the order in which Control4 delivers
    network events are modelled by the simulator in both orders (later, and inside the
    call). The watchdog's recovery from a stuck client, and behaviour on a controller under
    load, have not been exercised on hardware.
-5. **Command names in Programming.** `ExecuteCommand` normalises names (case, spaces,
+4. **Command names in Programming.** `ExecuteCommand` normalises names (case, spaces,
    underscores), so either spelling Director sends is handled.
-6. **PJLink availability.** Whether PJLink keeps working when other network services on
+5. **PJLink availability.** Whether PJLink keeps working when other network services on
    your projector hang is a property of the projector's firmware, not of this driver.
-7. **Standby networking.** The projector must keep its network on in standby to be
+6. **Standby networking.** The projector must keep its network on in standby to be
    switched on over the network.
 
 If something misbehaves, set **Log Level** to Debug and keep the log; the **Last Error**
