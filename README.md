@@ -96,10 +96,23 @@ authentication failure.
 **Events** fire on real transitions only. Startup discovery, and recovery into the state
 the projector was already in, fire nothing.
 
-## Not verified in this repository
+## Hardware verification status
 
 The suite proves the logic. It cannot prove behaviour that depends on a real controller
-or projector. Check these on site:
+or projector, so this section separates what has been seen on hardware from what has not.
+
+### Confirmed on hardware (EH-LS12000B on a Control4 controller)
+
+- **PJLink control works** as of 1.0.5: the connection opens, power on and polling run.
+  This is the build that fixed the client waiting forever when Control4 reports the
+  connection closing from inside `NetDisconnect`. 1.0.6 keeps that fix and adds the
+  IP-change, stray-greeting and Last Error fixes, which have not been tried on the unit yet.
+- **Web method:** `json_query?jsoncallback=PWR?` with Digest auth and a Referer header,
+  `directsend?IMPWR=ON` and `directsend?IMPWR=OFF`, and the `KEY=6C` power key.
+- **Logging:** log lines appear in Composer Pro's Lua output with Log Level and Log Output
+  (debug logs from the unit were used to find the 1.0.5 fix).
+
+### Not verified: check on site
 
 1. **Proxy structure.** Modelled on Control4's own Sanyo PLC-WXE45 and certified Epson LS12000B drivers:
    proxy type `projector`, proxy connection class `TV` (type 2), input bindings
@@ -111,21 +124,32 @@ or projector. Check these on site:
 2. **Input codes.** Defaults are Epson's documented `32` (HDMI 1) and `33` (HDMI 2) for the
    EH-LS12000B (User's Guide, "PJLink Support"). Use the
    *Read Input List* action and correct the properties if your model differs.
-3. **Network binding re-creation.** Changing the IP calls `C4:CreateNetworkConnection`
-   again on binding 6001. Confirm it picks up the new address; if not, restart the driver.
-4. **Command names in Programming.** `ExecuteCommand` normalises names (case, spaces,
+3. **Changing the IP while running.** The first connection is confirmed, but changing the
+   address calls `C4:CreateNetworkConnection` again on binding 6001 and resets the link.
+   The tests cover the driver's side; confirm on the controller that Director picks up the
+   new address, and restart the driver if it does not. (The binding is created at runtime
+   and is not declared in `driver.xml`; it works in practice, but this is not documented
+   Control4 behaviour.)
+4. **Timing under load.** Timers (`C4:SetTimer`) and the order in which Control4 delivers
+   network events are modelled by the simulator in both orders (later, and inside the
+   call). The watchdog's recovery from a stuck client, and behaviour on a controller under
+   load, have not been exercised on hardware.
+5. **Command names in Programming.** `ExecuteCommand` normalises names (case, spaces,
    underscores), so either spelling Director sends is handled.
-5. **PJLink availability.** Whether PJLink keeps working when other network services on
+6. **PJLink availability.** Whether PJLink keeps working when other network services on
    your projector hang is a property of the projector's firmware, not of this driver.
-6. **Standby networking.** The projector must keep its network on in standby to be
+7. **Standby networking.** The projector must keep its network on in standby to be
    switched on over the network.
+
+If something misbehaves, set **Log Level** to Debug and keep the log; the **Last Error**
+property shows the most recent warning or error and its cause.
 
 ## Web (HTTP) method: what is and is not verified
 
 Verified against an EH-LS12000B (from captures you provided): the status query
 `json_query?jsoncallback=PWR?` with Digest auth and a Referer header, and the Basic Control
-requests `directsend?IMPWR=ON` and `directsend?KEY=6C`, plus `directsend?IMPWR=OFF` (tried
-by hand on the same unit). Everything else is from Epson's
+requests `directsend?IMPWR=ON` and `directsend?KEY=6C`, plus `directsend?IMPWR=OFF`
+(confirmed by hand and through the driver on the same unit). Everything else is from Epson's
 ESC/VP21 documentation or is configurable:
 
 - `SOURCE?` replies `30` / `A0` for HDMI1 / HDMI2 (Epson's ESC/VP21 list), and `ERR?` / `LAMP?`
