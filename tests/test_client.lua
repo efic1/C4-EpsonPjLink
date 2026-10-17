@@ -441,3 +441,95 @@ t.test("the watchdog never fires during normal slow traffic", function()
   clock:advance(300000)
   for i = 1, 20 do t.eq(box[i].calls, 1) ; t.truthy(box[i].res.ok, "request " .. i) end
 end)
+
+t.suite("client: Control4 reports events from inside the call")
+
+--- Control4 reports OFFLINE from inside C4:NetDisconnect (and may report ONLINE from inside
+-- C4:NetConnect). The client must not arm a timer after such a call that cancels the one
+-- the event handler just armed, or it waits in "settling" for ever (the field bug).
+local function sync_env(clock, replies)
+  local env, client = {}, nil
+  local logs = {}
+  env.set_timer = function(ms, fn) return clock:set_timer(ms, fn) end
+  env.md5 = function() return "x" end
+  env.log = function(level, msg) logs[#logs + 1] = level .. ": " .. msg end
+  env.connect = function()
+    client:on_status("ONLINE")
+    client:on_data("PJLINK 0\r")
+  end
+  env.disconnect = function() client:on_status("OFFLINE") end
+  env.send = function(data) client:on_data(replies or "%1POWR=0\r") end
+  return env, function(c) client = c end, logs
+end
+
+t.test("OFFLINE reported inside disconnect() does not wedge the client", function()
+  local clock = H.new_clock()
+  local env, set_client, logs = sync_env(clock)
+  local client = Client.new(env, { host = "10.0.0.5" })
+  set_client(client)
+
+  local boxes = {}
+  for i = 1, 6 do
+    boxes[i] = capture()
+    client:request("POWR", "?", boxes[i].cb)
+  end
+  clock:advance(10000) -- far below the watchdog
+  for i = 1, 6 do
+    t.eq(boxes[i].calls, 1, "request " .. i .. " completed")
+    t.truthy(boxes[i].res.ok)
+  end
+  t.eq(client.state, "idle")
+  t.eq(table.concat(logs, "\n"):find("made no progress", 1, true), nil, "the watchdog was not needed")
+  t.eq(table.concat(logs, "\n"):find("no timer", 1, true), nil, "the settle guard was not needed")
+end)
+
+t.test("randomised event orderings, including events inside calls, never leave the client stuck", function()
+  local stuck = {}
+  for seed = 1, 400 do
+    math.randomseed(seed)
+    local clock = H.new_clock()
+    local client
+    local function after(ms, fn) clock:set_timer(ms, fn) end
+    local env = {
+      set_timer = function(ms, fn) return clock:set_timer(ms, fn) end,
+      md5 = function() return "x" end,
+      log = function() end,
+      connect = function()
+        local r = math.random(1, 6)
+        if r == 1 then client:on_status("ONLINE"); client:on_data("PJLINK 0\r"); return end
+        if r == 2 then return end
+        if r == 3 then after(math.random(0, 300), function() client:on_status("OFFLINE") end); return end
+        after(math.random(0, 300), function()
+          client:on_status("ONLINE")
+          after(math.random(0, 150), function() client:on_data("PJLINK 0\r") end)
+        end)
+      end,
+      disconnect = function()
+        local r = math.random(1, 4)
+        if r == 1 then client:on_status("OFFLINE"); return end
+        if r == 2 then return end
+        after(math.random(0, 300), function() client:on_status("OFFLINE") end)
+        if r == 3 then after(math.random(0, 500), function() client:on_status("ONLINE") end) end
+      end,
+      send = function()
+        local r = math.random(1, 3)
+        if r == 1 then client:on_data("%1POWR=OK\r"); return end
+        if r == 2 then return end
+        after(math.random(0, 200), function() client:on_data("%1POWR=OK\r") end)
+      end,
+    }
+    client = Client.new(env, { host = "10.0.0.5" })
+    local issued, done = 0, 0
+    for i = 1, 10 do
+      after(math.random(0, 15000), function()
+        issued = issued + 1
+        client:request("POWR", (i % 2 == 0) and "?" or "1", function() done = done + 1 end)
+      end)
+    end
+    clock:advance(120000)
+    if client.state ~= "idle" or #client.queue ~= 0 or issued ~= done then
+      stuck[#stuck + 1] = seed
+    end
+  end
+  t.eq(#stuck, 0, "stuck seeds: " .. table.concat(stuck, ","))
+end)

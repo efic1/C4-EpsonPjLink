@@ -251,6 +251,11 @@ end
 -- Internals ------------------------------------------------------------------
 
 function Client:_pump()
+  if self.state == "settling" and not self.timer then
+    -- nothing is left that could end the settle wait: never wait on a timer that is gone
+    self:_log("warn", "client was settling with no timer; continuing")
+    self.state = "idle"
+  end
   if self.state ~= "idle" then
     self:_log("debug", "request waits: client busy (state=" .. self.state .. ")")
     return
@@ -334,8 +339,11 @@ function Client:_force_close()
   self:_disarm()
   self.online = true
   self.state = "closing"
-  self.env.disconnect()
+  -- Arm BEFORE disconnecting: Control4 reports OFFLINE from inside the disconnect call,
+  -- which runs _closed() and arms the settle gap. Arming afterwards would cancel that gap
+  -- and leave the client waiting in "settling" forever.
   self:_arm(self.close_timeout, function() self:_closed() end)
+  self.env.disconnect()
 end
 
 function Client:_finish(res, force_close)
@@ -356,8 +364,9 @@ function Client:_finish(res, force_close)
 
   if self.online or force_close then
     self.online = true
-    self.env.disconnect()
+    -- arm first: OFFLINE may be reported from inside disconnect() (see _force_close)
     self:_arm(self.close_timeout, function() self:_closed() end)
+    self.env.disconnect()
   else
     self:_closed()
   end
