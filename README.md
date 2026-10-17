@@ -34,7 +34,16 @@ without a controller.
 ```
 lua5.1 tests/run.lua            # everything
 lua5.1 tests/run.lua cooldown   # only tests whose group/name contains "cooldown"
+
+C4_SYNC=disconnect lua5.1 tests/run.lua   # OFFLINE reported inside NetDisconnect, as Control4 does
+C4_SYNC=all        lua5.1 tests/run.lua   # every network event reported inside the call
+CHAOS_SEEDS=1000   lua5.1 tests/run.lua "after random"   # many more random sessions (default 120)
 ```
+
+`build.sh` runs the suite in all three modes. The default (events arrive later, from a timer)
+is not what a real controller does: Control4 reports OFFLINE from inside `C4:NetDisconnect`,
+and a suite that only ever delivers events later cannot see ordering bugs around that. One
+such bug (a PJLink client that waited forever after its first poll) shipped because of it.
 
 LuaJIT works too (`luajit tests/run.lua`). The tests use Lua 5.1 deliberately: it is
 the language level Director's LuaJIT mode implements, and `test_manifest.lua` rejects

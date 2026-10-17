@@ -208,7 +208,7 @@ t.test("multiple priority requests keep their relative order", function()
   t.deep_eq(order, { "POWR", "P1", "P2", "ERST" })
 end)
 
-t.test("queue limit rejects with QUEUE_FULL", function()
+t.test_async("queue limit rejects with QUEUE_FULL", function()
   local clock, sim, client = new_client({ power = "1" }, { max_queue = 2 })
   client:request("POWR", "?")
   client:request("INPT", "?")
@@ -237,7 +237,7 @@ t.test("an error inside a callback does not wedge the client", function()
   t.truthy(r.res.ok)
 end)
 
-t.test("reset() fails queued callbacks with CANCELLED and the client keeps working", function()
+t.test_async("reset() fails queued callbacks with CANCELLED and the client keeps working", function()
   local clock, sim, client = new_client({ power = "1" })
   local a, b = capture(), capture()
   client:request("POWR", "?", a.cb)
@@ -253,7 +253,7 @@ t.test("reset() fails queued callbacks with CANCELLED and the client keeps worki
   t.truthy(r.res.ok)
 end)
 
-t.test("set_host with a new address cancels pending work", function()
+t.test_async("set_host with a new address cancels pending work", function()
   local clock, sim, client = new_client({ power = "1" })
   local a = capture()
   client:request("POWR", "?", a.cb)
@@ -362,7 +362,7 @@ end)
 
 t.suite("client: review fixes")
 
-t.test("reset() with an open connection: the old socket's OFFLINE does not fail the next request", function()
+t.test_async("reset() with an open connection: the old socket's OFFLINE does not fail the next request", function()
   local clock, sim, client = new_client({ power = "1" })
   local a = capture()
   client:request("POWR", "?", a.cb)
@@ -377,7 +377,7 @@ t.test("reset() with an open connection: the old socket's OFFLINE does not fail 
   t.eq(sim.open_count, 0, "no socket left open")
 end)
 
-t.test("a connect that completes after the connect timeout is closed again", function()
+t.test_async("a connect that completes after the connect timeout is closed again", function()
   local clock, sim, client = new_client({ power = "1", latency = 6000 })
   local r = capture()
   client:request("POWR", "?", r.cb)
@@ -532,4 +532,18 @@ t.test("randomised event orderings, including events inside calls, never leave t
     end
   end
   t.eq(#stuck, 0, "stuck seeds: " .. table.concat(stuck, ","))
+end)
+
+t.test("a stray greeting from a stale connection while waiting for a reply is ignored", function()
+  local clock = H.new_clock()
+  local env, set_client, logs = sync_env(clock, "PJLINK 0\r%1POWR=1\r")
+  local client = Client.new(env, { host = "10.0.0.5" })
+  set_client(client)
+  local box = capture()
+  client:request("POWR", "?", box.cb)
+  clock:advance(5000)
+  t.eq(box.calls, 1)
+  t.truthy(box.res.ok, "the real reply still counts: " .. tostring(box.res.err))
+  t.eq(box.res.value, "1")
+  t.truthy(table.concat(logs, "\n"):find("stray greeting", 1, true))
 end)

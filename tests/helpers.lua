@@ -59,7 +59,13 @@ Sim.__index = Sim
 
 --- opts: password, power ("0" standby|"1" on|"2" cooling|"3" warming), input,
 --  inputs, erst, lamp, model, reachable, blackhole, mute, latency,
---  warm_ms, cool_ms, stale_ms
+--  warm_ms, cool_ms, stale_ms, cancel_on_disconnect,
+--  sync: how network events reach the driver.
+--    nil / "async"  later, from a timer (the original behaviour)
+--    "disconnect"   OFFLINE is reported from inside disconnect(), as Control4 does
+--    "all"          connect results, replies and OFFLINE all arrive inside the call
+--  The C4_SYNC environment variable sets the default, so the whole suite can be rerun in
+--  each mode:  C4_SYNC=disconnect lua5.1 tests/run.lua
 function H.new_sim(clock, opts)
   opts = opts or {}
   local sim = setmetatable({
@@ -76,6 +82,9 @@ function H.new_sim(clock, opts)
     blackhole = opts.blackhole or false,
     mute = opts.mute or false,
     latency = opts.latency or 20,
+    sync = opts.sync or os.getenv("C4_SYNC"),
+    cancel_on_disconnect = opts.cancel_on_disconnect or false, -- a disconnect also cancels a connect still in progress
+    epoch = 0,
     warm_ms = opts.warm_ms or 30000,
     cool_ms = opts.cool_ms or 60000,
     stale_ms = opts.stale_ms,
@@ -113,6 +122,15 @@ function Sim:count(command)
   return n
 end
 
+--- Run fn after the network latency, or straight away in a synchronous mode.
+function Sim:_defer(kind, fn)
+  local sync = self.sync
+  if sync == "1" or sync == "all" or (sync == "disconnect" and kind == "disconnect") then
+    return fn()
+  end
+  return self.clock:set_timer(self.latency, fn)
+end
+
 function Sim:env()
   local sim = self
   return {
@@ -120,7 +138,9 @@ function Sim:env()
       sim.connects = sim.connects + 1
       sim.connect_times[#sim.connect_times + 1] = sim.clock.t
       if sim.blackhole then return end
-      sim.clock:set_timer(sim.latency, function()
+      local epoch = sim.epoch
+      sim:_defer("connect", function()
+        if sim.cancel_on_disconnect and sim.epoch ~= epoch then return end -- cancelled before it completed
         if not sim.reachable then
           sim.target:on_status("OFFLINE")
           return
@@ -132,13 +152,14 @@ function Sim:env()
       end)
     end,
     disconnect = function()
-      sim.clock:set_timer(sim.latency, function()
+      sim.epoch = sim.epoch + 1
+      sim:_defer("disconnect", function()
         if sim.open_count > 0 then sim.open_count = sim.open_count - 1 end
         sim.target:on_status("OFFLINE")
       end)
     end,
     send = function(data)
-      sim.clock:set_timer(sim.latency, function() sim:_receive(data) end)
+      sim:_defer("send", function() sim:_receive(data) end)
     end,
     set_timer = function(ms, fn) return sim.clock:set_timer(ms, fn) end,
     md5 = md5.hex,

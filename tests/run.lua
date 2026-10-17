@@ -29,5 +29,8 @@ if filter then
 end
 
 local passed, failed = t.run()
-print(string.format("\n%d passed, %d failed", passed, failed))
+local mode = os.getenv("C4_SYNC")
+if mode == nil or mode == "" then mode = "async" end
+print(string.format("\n%d passed, %d failed, %d skipped  [network events: %s]",
+  passed, failed, t.skipped or 0, mode))
 os.exit(failed == 0 and 0 or 1)

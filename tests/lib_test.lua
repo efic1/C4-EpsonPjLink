@@ -8,6 +8,13 @@ function T.test(name, fn)
   T.tests[#T.tests + 1] = { group = T.group, name = name, fn = fn }
 end
 
+--- A test that builds an in-flight situation (a request still queued, a connect still
+-- pending). Those cannot exist when every network event arrives inside the call that
+-- caused it, so they are skipped (and counted) in the C4_SYNC=all run.
+function T.test_async(name, fn)
+  T.tests[#T.tests + 1] = { group = T.group, name = name, fn = fn, async_only = true }
+end
+
 local function fmt(v)
   if type(v) == "string" then return string.format("%q", v) end
   return tostring(v)
@@ -67,8 +74,13 @@ function T.run()
       print("\n" .. t.group)
       last_group = t.group
     end
-    local ok, err = pcall(t.fn)
-    if ok then
+    local skip = t.async_only and os.getenv("C4_SYNC") == "all"
+    local ok, err
+    if skip then ok = true else ok, err = pcall(t.fn) end
+    if skip then
+      T.skipped = (T.skipped or 0) + 1
+      print("  SKIP  " .. t.name .. "  (needs a request in flight; not possible with C4_SYNC=all)")
+    elseif ok then
       passed = passed + 1
       print("  PASS  " .. t.name)
     else

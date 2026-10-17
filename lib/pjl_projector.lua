@@ -106,6 +106,15 @@ function Projector:stop()
   self:_cancel_timer()
 end
 
+--- Forget what we knew about the connection (the address changed): the next successful
+-- poll announces "Connected" again instead of staying silent because the old link was up.
+function Projector:reset_link()
+  self.link = nil
+  self.fail_count = 0
+  self.auth_failed = false
+  self.model_asked = false
+end
+
 --- Forget auth lockout (call after the password changes) and poll now.
 function Projector:reset_auth()
   self.auth_failed = false
@@ -160,7 +169,8 @@ function Projector:_failure(res)
   if self.fail_count >= self.cfg.fail_threshold and self.link ~= false then
     local was = self.link
     self.link = false
-    self:_log("warn", "marking projector offline after " .. self.fail_count .. " failed request(s) in a row")
+    self:_log("warn", "projector offline: " .. self.fail_count .. " failed request(s) in a row (last error "
+      .. tostring(res.err) .. ")")
     self:_set_state("OFFLINE")
     self:_emit("status", "Offline - projector not responding")
     self:_emit("link", false, was)

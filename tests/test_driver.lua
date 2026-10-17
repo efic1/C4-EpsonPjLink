@@ -151,7 +151,7 @@ t.test("registers variables, sets the version and waits for an IP address", func
   t.eq(d.sim.connects, 0, "must not try to connect without an address")
 end)
 
-t.test("entering an IP creates the TCP network binding and starts polling", function()
+t.test_async("entering an IP creates the TCP network binding and starts polling", function()
   local d = load_driver({ sim = { power = "0" } })
   d:boot()
   d:set("IP Address", "  192.168.1.50 ")
@@ -1027,4 +1027,344 @@ t.test("web mode: stray network events from the PJLink binding are ignored, not 
   t.truthy(ok, tostring(err))
   d.clock:advance(40 * SEC)
   t.eq(d.rec.props["Connection Status"], "Connected")
+end)
+
+-- End-to-end ---------------------------------------------------------------------------------
+-- Whole sessions through the real driver.lua. Run under every C4_SYNC mode (see tests/helpers.lua).
+
+t.suite("driver: end-to-end PJLink sessions")
+
+local LOUD = { ["Log Level"] = "Info", ["Log Output"] = "Print" }
+
+local function with(base, extra)
+  local out = {}
+  for k, v in pairs(base) do out[k] = v end
+  for k, v in pairs(extra or {}) do out[k] = v end
+  return out
+end
+
+--- Printed warning/error lines.
+local function problems(d)
+  local out = {}
+  for _, line in ipairs(d.rec.printed) do
+    if line:find("[Epson WARN]", 1, true) or line:find("[Epson ERROR]", 1, true) then
+      out[#out + 1] = line
+    end
+  end
+  return out
+end
+
+local function last_error(d) return d.rec.props["Last Error"] or "" end
+
+local function pjlink_driver(sim, props)
+  return load_driver({ sim = sim, props = with(LOUD, props) })
+end
+
+t.test("a complete session with a password: connect, on, input, off - and no warnings", function()
+  local d = pjlink_driver({ power = "0", password = "secret", warm_ms = 20 * SEC, cool_ms = 20 * SEC },
+    { ["PJLink Password"] = "secret" })
+  d:connect()
+  d.clock:advance(10 * SEC)
+  t.eq(d.rec.props["Connection Status"], "Connected")
+  t.eq(d.rec.props["Power State"], "Standby")
+  t.eq(d.rec.props["Projector Model"], "TEST-PROJECTOR")
+
+  d.env.ReceivedFromProxy(5001, "ON", {})
+  d.clock:advance(60 * SEC)
+  t.eq(d.sim.power, "1")
+  t.eq(d.rec.props["Power State"], "On")
+  t.eq(d.sim:count("POWR 1"), 1)
+
+  d.env.ReceivedFromProxy(5001, "SET_INPUT", { INPUT = 1022 })
+  d.clock:advance(20 * SEC)
+  t.eq(d.sim.input, "33")
+  t.eq(d.rec.props["Current Input"], "HDMI 2")
+
+  d.env.ReceivedFromProxy(5001, "OFF", {})
+  d.clock:advance(60 * SEC)
+  t.eq(d.sim.power, "0")
+  t.eq(d.rec.props["Power State"], "Standby")
+  t.eq(d.sim.auth_failures, 0)
+  t.eq(d.sim.max_open, 1, "never more than one connection at a time")
+  t.eq(d.sim.open_count, 0, "no connection left open")
+  t.deep_eq(problems(d), {})
+  t.eq(last_error(d), "")
+end)
+
+t.test("pressing Off repeatedly sends one power-off and never switches the projector on", function()
+  local d = pjlink_driver({ power = "1", cool_ms = 20 * SEC })
+  d:connect()
+  d.clock:advance(10 * SEC)
+  for _ = 1, 4 do
+    d.env.ReceivedFromProxy(5001, "OFF", {})
+    d.clock:advance(1 * SEC)
+  end
+  d.clock:advance(60 * SEC)
+  d.env.ReceivedFromProxy(5001, "OFF", {})
+  d.clock:advance(30 * SEC)
+  t.eq(d.sim.power, "0")
+  t.eq(d.sim:count("POWR 0"), 1)
+  t.eq(d.sim:count("POWR 1"), 0)
+end)
+
+t.test("Reset Connection at any moment never breaks the next command", function()
+  for offset = 0, 4000, 130 do
+    local d = pjlink_driver({ power = "0", warm_ms = 10 * SEC })
+    d:connect()
+    d.clock:advance(offset)
+    d:action("ResetConnection")
+    d.env.ReceivedFromProxy(5001, "ON", {})
+    d.clock:advance(90 * SEC)
+    t.eq(d.sim.power, "1", "after a reset at +" .. offset .. " ms")
+    t.eq(d.sim.open_count, 0, "no leaked connection after a reset at +" .. offset .. " ms")
+  end
+end)
+
+t.test("changing the IP address while running reconnects and still controls the projector", function()
+  local d = pjlink_driver({ power = "0", warm_ms = 10 * SEC })
+  d:connect("192.168.1.50")
+  d.clock:advance(10 * SEC)
+  d:set("IP Address", "192.168.1.77")
+  d.clock:advance(10 * SEC)
+  t.eq(d.rec.created[#d.rec.created].ip, "192.168.1.77")
+  t.eq(d.rec.props["Connection Status"], "Connected")
+  d.env.ReceivedFromProxy(5001, "ON", {})
+  d.clock:advance(60 * SEC)
+  t.eq(d.sim.power, "1")
+end)
+
+t.test("an unreachable projector goes Offline with a reason, and recovers by itself", function()
+  local d = pjlink_driver({ power = "0", reachable = false })
+  d:connect()
+  d.clock:advance(3 * 60 * SEC)
+  t.eq(d.rec.props["Connection Status"], "Offline - projector not responding")
+  t.contains(last_error(d), "CONNECT")
+  d.sim.reachable = true
+  d.clock:advance(2 * 60 * SEC)
+  t.eq(d.rec.props["Connection Status"], "Connected")
+  t.eq(d.rec.props["Power State"], "Standby")
+end)
+
+t.test("a power-on requested while unreachable is dropped, not applied minutes later", function()
+  local d = pjlink_driver({ power = "0", reachable = false })
+  d:connect()
+  d.clock:advance(5 * SEC)
+  d.env.ReceivedFromProxy(5001, "ON", {})
+  d.clock:advance(4 * 60 * SEC)
+  d.sim.reachable = true
+  d.clock:advance(3 * 60 * SEC)
+  t.eq(d.sim.power, "0")
+  t.eq(d.sim:count("POWR 1"), 0)
+end)
+
+t.test("a wrong password is reported clearly and is not retried in a loop", function()
+  local d = pjlink_driver({ power = "0", password = "right" }, { ["PJLink Password"] = "wrong" })
+  d:connect()
+  d.clock:advance(20 * 60 * SEC)
+  t.contains(d.rec.props["Connection Status"], "Authentication failed")
+  t.truthy(d.sim.auth_failures <= 6, "auth attempts: " .. d.sim.auth_failures)
+  d:set("PJLink Password", "right")
+  d.clock:advance(10 * SEC)
+  t.eq(d.rec.props["Connection Status"], "Connected")
+end)
+
+t.test("switching Control Method PJLink -> Web -> PJLink at runtime keeps working", function()
+  local d = load_driver({
+    sim = { power = "0", warm_ms = 10 * SEC },
+    web_sim = { power = "04", warm_ms = 10 * SEC, cool_ms = 10 * SEC },
+    props = with(LOUD, {}),
+  })
+  d:connect()
+  d.clock:advance(10 * SEC)
+  t.eq(d.rec.props["Connection Status"], "Connected")
+  local pjlink_connects = d.sim.connects
+  t.truthy(pjlink_connects > 0)
+
+  d:set("Control Method", WEB)
+  d.clock:advance(10 * SEC)
+  t.eq(d.sim.connects, pjlink_connects, "web mode opens no PJLink connections")
+  t.truthy(d.web:count_queries("PWR?") >= 1)
+  d.env.ReceivedFromProxy(5001, "ON", {})
+  d.clock:advance(60 * SEC)
+  t.eq(d.web.power, "01")
+
+  d:set("Control Method", "PJLink")
+  d.clock:advance(10 * SEC)
+  t.truthy(d.sim.connects > pjlink_connects, "PJLink connects again")
+  t.eq(d.rec.props["Connection Status"], "Connected")
+  d.env.ReceivedFromProxy(5001, "ON", {})
+  d.clock:advance(60 * SEC)
+  t.eq(d.sim.power, "1")
+end)
+
+t.test("24 hours of idle polling: steady, bounded, quiet", function()
+  local d = pjlink_driver({ power = "1" })
+  d:connect()
+  for _ = 1, 24 * 60 do d.clock:advance(60 * SEC) end
+  t.truthy(d.sim:count("POWR ?") >= 2500, "polls: " .. d.sim:count("POWR ?"))
+  t.truthy(#d.clock.timers < 12, "pending timers: " .. #d.clock.timers)
+  t.eq(d.sim.max_open, 1)
+  t.eq(d.sim.open_count, 0)
+  t.eq(d.rec.props["Connection Status"], "Connected")
+  t.deep_eq(problems(d), {})
+end)
+
+t.suite("driver: randomised sessions")
+
+--- Fire a random mix of Control4 commands, property edits and network faults at the driver,
+-- then heal everything and check the driver is healthy and still obeys commands.
+local function chaos(seed)
+  math.randomseed(seed)
+  local d = pjlink_driver({ power = (math.random(2) == 1) and "1" or "0", warm_ms = 8 * SEC,
+    cool_ms = 8 * SEC, latency = math.random(5, 400), cancel_on_disconnect = true },
+    { ["Idle Polling Interval (seconds)"] = "10" })
+  d:connect()
+
+  local steps = {
+    function() d.env.ReceivedFromProxy(5001, "ON", {}) end,
+    function() d.env.ReceivedFromProxy(5001, "OFF", {}) end,
+    function() d.env.ReceivedFromProxy(5001, "SET_INPUT", { INPUT = (math.random(2) == 1) and 1021 or 1022 }) end,
+    function() d:action("PollNow") end,
+    function() d:action("TestConnection") end,
+    function() d:action("ResetConnection") end,
+    function() d:action("ReadInputList") end,
+    function() d:set("IP Address", (math.random(2) == 1) and "192.168.1.50" or "192.168.1.51") end,
+    function() d:set("Request Timeout (seconds)", tostring(math.random(2, 8))) end,
+    function() d:set("Idle Polling Interval (seconds)", tostring(math.random(10, 40))) end,
+    function() d.sim.reachable = (math.random(3) > 1) end,
+    function() d.sim.blackhole = (math.random(3) == 1) end,
+    function() d.sim.power = (math.random(2) == 1) and "1" or "0" end, -- someone used the remote
+    function() d.sim.erst = (math.random(2) == 1) and "000000" or "000200" end,
+    function() d:set("PJLink Password", "") end,
+  }
+  for _ = 1, 40 do
+    steps[math.random(#steps)]()
+    d.clock:advance(math.random(200, 20000))
+  end
+
+  -- heal everything and let it settle
+  d.sim.reachable, d.sim.blackhole = true, false
+  d:set("IP Address", "192.168.1.50")
+  d:set("Request Timeout (seconds)", "5")
+  d:set("Idle Polling Interval (seconds)", "10")
+  d:action("ResetConnection")
+  d.clock:advance(10 * 60 * SEC)
+  return d
+end
+
+t.test("after random commands and network faults the driver recovers and obeys", function()
+  local bad = {}
+  local seeds = tonumber(os.getenv("CHAOS_SEEDS")) or 120
+  for seed = 1, seeds do
+    local d = chaos(seed)
+    local why
+    local log = table.concat(d.rec.printed, "\n")
+    if d.rec.props["Connection Status"] ~= "Connected" then
+      why = "not connected: " .. tostring(d.rec.props["Connection Status"])
+    elseif d.sim.max_open > 1 then
+      why = "two connections open at once"
+    elseif log:find("made no progress", 1, true) or log:find("with no timer", 1, true) then
+      why = "client wedged (watchdog or settle guard fired)"
+    else
+      -- Polling goes on for ever, so a connection is open now and then. A leak would be one
+      -- that stays open: sample for a minute and require it to be closed most of the time.
+      local polls, closed, samples = d.sim:count("POWR ?"), 0, 0
+      for _ = 1, 600 do
+        d.clock:advance(100)
+        samples = samples + 1
+        if d.sim.open_count == 0 then closed = closed + 1 end
+        if d.sim.open_count > 1 then why = "two connections open at once" end
+      end
+      if d.sim:count("POWR ?") <= polls then why = "polling stopped" end
+      if not why and closed < samples * 0.7 then
+        why = "connection held open " .. (samples - closed) .. " of " .. samples .. " samples"
+      end
+    end
+    if not why then
+      -- it still obeys: force a known starting point, then turn it on
+      d.sim.power = "0"
+      d.clock:advance(40 * SEC)
+      d.env.ReceivedFromProxy(5001, "ON", {})
+      d.clock:advance(90 * SEC)
+      if d.sim.power ~= "1" then why = "did not obey Power On (sim power=" .. d.sim.power .. ")" end
+    end
+    if why then bad[#bad + 1] = "seed " .. seed .. ": " .. why end
+  end
+  t.eq(#bad, 0, table.concat(bad, "; "))
+end)
+
+local function web_chaos(seed)
+  math.randomseed(seed)
+  local d = load_driver({
+    web_sim = { power = (math.random(2) == 1) and "01" or "04", warm_ms = 8 * SEC, cool_ms = 8 * SEC,
+      latency = math.random(5, 300), web_password = "w", remote_password = "r",
+      nonce_ttl_ms = (math.random(2) == 1) and 20 * SEC or nil },
+    props = with(LOUD, { ["Control Method"] = WEB, ["Web Control Password"] = "w", ["Remote Password"] = "r",
+      ["Idle Polling Interval (seconds)"] = "10",
+      ["HDMI 1 Select Request"] = "KEY=4D", ["HDMI 2 Select Request"] = "KEY=40" }),
+  })
+  d:connect()
+  local steps = {
+    function() d.env.ReceivedFromProxy(5001, "ON", {}) end,
+    function() d.env.ReceivedFromProxy(5001, "OFF", {}) end,
+    function() d.env.ReceivedFromProxy(5001, "OFF", {}) end,
+    function() d.env.ReceivedFromProxy(5001, "SET_INPUT", { INPUT = (math.random(2) == 1) and 1021 or 1022 }) end,
+    function() d:action("PollNow") end,
+    function() d:action("TestConnection") end,
+    function() d.reset_used = true; d:action("ResetConnection") end,
+    function() d:set("Request Timeout (seconds)", tostring(math.random(2, 8))) end,
+    function() d:set("Idle Polling Interval (seconds)", tostring(math.random(10, 40))) end,
+    function() d.web.reachable = (math.random(3) > 1) end,
+    function() d.web.blackhole = (math.random(3) == 1) end,
+    function() d.web.power = (math.random(2) == 1) and "01" or "04" end, -- the remote was used
+  }
+  for _ = 1, 40 do
+    steps[math.random(#steps)]()
+    d.clock:advance(math.random(200, 20000))
+  end
+  d.web.reachable, d.web.blackhole = true, false
+  d:set("Request Timeout (seconds)", "5")
+  d:set("Idle Polling Interval (seconds)", "10")
+  d.clock:advance(10 * 60 * SEC) -- abandoned or blackholed requests time out by themselves
+  return d
+end
+
+t.test("web: after random commands and network faults the driver recovers and obeys", function()
+  local bad = {}
+  local seeds = tonumber(os.getenv("CHAOS_SEEDS")) or 120
+  for seed = 1, seeds do
+    local d = web_chaos(seed)
+    local why
+    local log = table.concat(d.rec.printed, "\n")
+    if d.rec.props["Connection Status"] ~= "Connected" then
+      why = "not connected: " .. tostring(d.rec.props["Connection Status"])
+    elseif d.web.max_in_flight > 1 and not d.reset_used then
+      -- After Reset Connection an abandoned request may still be on the wire (it cannot be
+      -- cancelled), so overlap is expected there; everywhere else it must never happen.
+      why = "more than one HTTP exchange at once"
+    elseif d.web:count("KEY=6C") > 0 then
+      why = "used the toggling power key"
+    elseif log:find("made no progress", 1, true) then
+      why = "stuck"
+    else
+      local polls = d.web:count_queries("PWR?")
+      d.clock:advance(60 * SEC)
+      if d.web:count_queries("PWR?") <= polls then why = "polling stopped" end
+    end
+    if not why then
+      d.web.power = "04"
+      d.clock:advance(40 * SEC)
+      d.env.ReceivedFromProxy(5001, "ON", {})
+      d.clock:advance(90 * SEC)
+      if d.web.power ~= "01" then
+        why = "did not obey Power On (power=" .. d.web.power .. ")"
+      else
+        d.env.ReceivedFromProxy(5001, "OFF", {})
+        d.clock:advance(90 * SEC)
+        if d.web.power ~= "04" then why = "did not obey Power Off (power=" .. d.web.power .. ")" end
+      end
+    end
+    if why then bad[#bad + 1] = "seed " .. seed .. ": " .. why end
+  end
+  t.eq(#bad, 0, table.concat(bad, "; "))
 end)

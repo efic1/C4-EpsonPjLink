@@ -13,7 +13,7 @@ local Client = require "lib.pjl_client"
 local EpsonHttp = require "lib.epson_http"
 local Projector = require "lib.pjl_projector"
 
-DRIVER_VERSION = "1.0.5"
+DRIVER_VERSION = "1.0.6"
 
 local PROXY_ID = 5001
 local NET_ID = 6001
@@ -118,6 +118,13 @@ local function emit_line(line)
   end
 end
 
+--- HH:MM:SS, or nothing if the controller's os library cannot supply it. A missing clock
+-- must never cost us the log line itself.
+local function timestamp()
+  local ok, text = pcall(os.date, "%H:%M:%S")
+  return ok and text or "--:--:--"
+end
+
 --- Log one line. level: error | warn | info | event | debug | trace.
 -- Never raises: a logging problem must not break projector control.
 local function dbg(level, message)
@@ -128,7 +135,7 @@ local function dbg(level, message)
       C4:UpdateProperty("Last Error", tostring(message))
     end
     if rank > log_threshold() then return end
-    emit_line(string.format("%s [Epson %s] %s", os.date("%H:%M:%S"),
+    emit_line(string.format("%s [Epson %s] %s", timestamp(),
       LOG_TAG[level] or tostring(level), tostring(message)))
   end)
 end
@@ -288,7 +295,7 @@ function handlers.fault(active, text, prev)
 end
 
 function handlers.link(online, was)
-  dbg(online and "info" or "warn", "link " .. (online and "up" or "DOWN")
+  dbg("info", "link " .. (online and "up" or "DOWN")
     .. " (was " .. tostring(was) .. ")")
   gLink = online
   set_var("CONNECTED", online and "1" or "0")
@@ -465,6 +472,7 @@ local function apply_config()
   if ip ~= (gHost or "") then
     gHost = (ip ~= "") and ip or nil
     gProjector:stop()
+    gProjector:reset_link()
     if gHost and gMethod == "pjlink" then
       dbg("info", "creating TCP network connection " .. NET_ID .. " to " .. gHost
         .. ":" .. tostring(codec.PORT))
@@ -477,7 +485,7 @@ local function apply_config()
     end
   end
   if not gHost then
-    dbg("warn", "IP Address property is empty - nothing to connect to")
+    dbg("info", "IP Address property is empty - nothing to connect to")
     set_prop("Connection Status", "Set the IP Address property")
   end
 end
@@ -513,7 +521,7 @@ function OnPropertyChanged(property)
     -- announce even when the new level would hide it, so the change is visible
     local level = Properties["Log Level"]
     if LOG_THRESHOLD[level or ""] ~= 0 then
-      emit_line(os.date("%H:%M:%S") .. " [Epson INFO] logging: level=" .. tostring(level)
+      emit_line(timestamp() .. " [Epson INFO] logging: level=" .. tostring(level)
         .. ", output=" .. log_output())
     end
     return

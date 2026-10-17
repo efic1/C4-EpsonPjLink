@@ -317,6 +317,12 @@ function Client:_on_line(line)
       self:_log("warn", "projector rejected the PJLink password")
       return self:_finish({ ok = false, err = "ERRA" })
     end
+    if line:upper():match("^PJLINK %d") then
+      -- A greeting while we wait for a reply belongs to another (stale) connection, for
+      -- example one we cancelled just before this request. It says nothing about ours.
+      self:_log("debug", "ignoring a stray greeting while waiting for a reply: " .. line)
+      return
+    end
     local res = codec.parse_response(line)
     if not res then
       self:_log("warn", "could not parse reply: " .. line)
