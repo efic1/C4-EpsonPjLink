@@ -400,3 +400,44 @@ t.test("reset() while a connect is pending cancels it and the next request still
   t.truthy(r.res.ok, "got " .. tostring(r.res.err))
   t.eq(sim.open_count, 0)
 end)
+
+t.suite("client: watchdog")
+
+t.test("a client wedged in a non-idle state with no timer is reset, logged, and works again", function()
+  local clock = H.new_clock()
+  local sim = H.new_sim(clock, { power = "0" })
+  local env = sim:env()
+  local logs = {}
+  env.log = function(level, msg) logs[#logs + 1] = level .. ": " .. msg end
+  local client = Client.new(env, { host = "10.0.0.5" })
+  sim:attach(client)
+
+  -- simulate the wedge: a busy state that nothing will ever leave
+  client.state = "closing"
+  local box = capture()
+  client:request("POWR", "?", box.cb)
+  clock:advance(5000)
+  t.eq(box.calls, 0, "still waiting at 5 s")
+  t.truthy(table.concat(logs, "\n"):find("request waits: client busy (state=closing)", 1, true))
+
+  clock:advance(30000)
+  t.eq(box.calls, 1, "the stuck request is failed instead of hanging forever")
+  t.eq(box.res.err, "STUCK")
+  t.truthy(table.concat(logs, "\n"):find("made no progress", 1, true))
+
+  local again = capture()
+  client:request("POWR", "?", again.cb)
+  clock:advance(10000)
+  t.eq(again.calls, 1)
+  t.truthy(again.res.ok, "works again after the reset")
+end)
+
+t.test("the watchdog never fires during normal slow traffic", function()
+  local clock, sim, client = new_client({ power = "1", latency = 400 })
+  local logs = {}
+  local env = sim:env()
+  local box = {}
+  for i = 1, 20 do box[i] = capture(); client:request("POWR", (i % 2 == 0) and "?" or "1", box[i].cb) end
+  clock:advance(300000)
+  for i = 1, 20 do t.eq(box[i].calls, 1) ; t.truthy(box[i].res.ok, "request " .. i) end
+end)

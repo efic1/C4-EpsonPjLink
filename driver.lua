@@ -13,7 +13,7 @@ local Client = require "lib.pjl_client"
 local EpsonHttp = require "lib.epson_http"
 local Projector = require "lib.pjl_projector"
 
-DRIVER_VERSION = "1.0.3"
+DRIVER_VERSION = "1.0.4"
 
 local PROXY_ID = 5001
 local NET_ID = 6001

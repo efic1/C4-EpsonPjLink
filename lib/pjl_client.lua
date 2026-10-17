@@ -40,6 +40,7 @@ function Client.new(env, opts)
   self.buffer = ""
   self.token = 0
   self.timer = nil
+  self.watchdog = nil
   return self
 end
 
@@ -147,7 +148,30 @@ function Client:request(body, param, callback, opts)
   end
   table.insert(self.queue, pos, job)
 
+  self:_log("debug", "queued " .. line:gsub("\r", "") .. " (client state=" .. self.state
+    .. ", " .. #self.queue .. " in queue)")
   self:_pump()
+  self:_watch()
+end
+
+--- Safety net: if the request at the head of the queue makes no progress at all (same
+-- request, same client state) for longer than every timeout together could take, say so
+-- and reset instead of leaving the driver silent and blocked forever.
+function Client:_watch()
+  if self.watchdog or #self.queue == 0 then return end
+  local job, state = self.queue[1], self.state
+  local ms = math.max(20000, 2 * (self.connect_timeout + self.response_timeout) + 8000)
+  self.watchdog = self.env.set_timer(ms, function()
+    self.watchdog = nil
+    if #self.queue == 0 then return end
+    if self.queue[1] == job and self.state == state then
+      self:_log("warn", "PJLink client made no progress for " .. math.floor(ms / 1000)
+        .. " s (stuck in state '" .. state .. "'); resetting it")
+      self:reset("STUCK")
+    else
+      self:_watch()
+    end
+  end)
 end
 
 --- Drop everything, close any open connection, fail queued callbacks.
@@ -227,7 +251,10 @@ end
 -- Internals ------------------------------------------------------------------
 
 function Client:_pump()
-  if self.state ~= "idle" then return end
+  if self.state ~= "idle" then
+    self:_log("debug", "request waits: client busy (state=" .. self.state .. ")")
+    return
+  end
   local job = self.queue[1]
   if not job then return end
 
