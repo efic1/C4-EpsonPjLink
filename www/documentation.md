@@ -96,7 +96,9 @@ Until the select requests are set, input changes are ignored (and logged); every
 | Idle Polling Interval (seconds) | 30 | How often to poll while nothing is changing (10 to 600). |
 | Request Timeout (seconds) | 5 | How long to wait to connect and for each reply (2 to 30). |
 | Light Source Hours Alert | 0 | Fires the Light Source Hours Alert event at this many hours. 0 turns it off. |
-| Debug Mode | Off | Off, Print (Lua output window) or Log (Director log). |
+| Log Level | Info | Off, Error, Warning, Info, Debug or Trace. Info logs connection, state changes, commands and failures. Debug adds every request and reply. Trace adds raw network data and HTTP bodies. |
+| Log Output | Print and Log | Print (the driver's Lua tab output in Composer), Log (the Director log) or both. |
+| Last Error | - | Read only: the most recent warning or error, shown whatever the Log Level. |
 | Connection Status | - | Read only: Connected, Connecting, Offline, Authentication failed. |
 | Power State | - | Read only: On, Standby, Warming Up, Cooling Down, Offline. |
 | Current Input | - | Read only. Shows HDMI 1 / HDMI 2 or the PJLink input name. |
@@ -225,7 +227,7 @@ While stable, each poll also reads the input and faults. Light source hours are 
 | Input does not change | Run Read Input List and compare with the HDMI Input Code properties. A code the projector does not support is dropped and logged. |
 | Navigator shows Off while the projector is still cooling | Expected. See Navigator and the Projector proxy. |
 | Fault Status shows warnings | Warnings (for example filter) are reported too. They clear when the projector stops reporting them. |
-| Need more detail | Set **Debug Mode** to Print, open the driver's Lua tab in Composer and watch the output, or choose Log to write to the Director log. Set it back to Off afterwards. |
+| Need more detail | Check the **Last Error** property first. For the full story set **Log Level** to Debug, open the driver's Lua tab in Composer and watch the output (Log Output Print), or read the Director log (Log Output Log). Use Trace only for raw network data. Set the level back to Info afterwards. Passwords are never logged. |
 
 ## Notes and limitations
 

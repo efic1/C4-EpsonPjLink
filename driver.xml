@@ -191,15 +191,38 @@
         <tooltip>Fire the Light Source Hours Alert event when the hours reach this value. 0 disables the alert.</tooltip>
       </property>
       <property>
-        <name>Debug Mode</name>
+        <name>Log Level</name>
         <type>LIST</type>
         <readonly>false</readonly>
-        <default>Off</default>
+        <default>Info</default>
         <items>
           <item>Off</item>
+          <item>Error</item>
+          <item>Warning</item>
+          <item>Info</item>
+          <item>Debug</item>
+          <item>Trace</item>
+        </items>
+        <tooltip>How much to log. Info: connection, state changes, commands and failures. Debug adds every request and reply. Trace adds raw network data and HTTP bodies.</tooltip>
+      </property>
+      <property>
+        <name>Log Output</name>
+        <type>LIST</type>
+        <readonly>false</readonly>
+        <default>Print and Log</default>
+        <items>
           <item>Print</item>
           <item>Log</item>
+          <item>Print and Log</item>
         </items>
+        <tooltip>Print writes to the driver's Lua tab output in Composer. Log writes to the Director log. Warnings and errors always also show in the Last Error property.</tooltip>
+      </property>
+      <property>
+        <name>Last Error</name>
+        <type>STRING</type>
+        <readonly>true</readonly>
+        <default></default>
+        <tooltip>Most recent warning or error the driver logged, whatever the Log Level.</tooltip>
       </property>
       <property>
         <name>Connection Status</name>

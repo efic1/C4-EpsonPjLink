@@ -96,6 +96,7 @@ end
 -- Lifecycle -------------------------------------------------------------------
 
 function Projector:start()
+  self:_log("info", "starting to poll the projector")
   self.running = true
   self:poll()
 end
@@ -116,6 +117,7 @@ end
 
 function Projector:_set_state(new)
   if new == self.state then return end
+  self:_log("debug", "state " .. tostring(self.state) .. " -> " .. tostring(new))
   local prev_real = self.last_real
   self.state = new
   if new ~= "OFFLINE" then self.last_real = new end
@@ -141,6 +143,10 @@ function Projector:_link_up()
 end
 
 function Projector:_failure(res)
+  self:_log(self.fail_count == 0 and "warn" or "debug", "request failed: " .. tostring(res.err)
+    .. (res.detail and (" (" .. tostring(res.detail) .. ")") or "")
+    .. " [failure " .. (self.fail_count + 1) .. " of " .. self.cfg.fail_threshold
+    .. " before the projector is marked offline]")
   if res.err == "ERRA" then
     self.auth_failed = true
     local was = self.link
@@ -154,6 +160,7 @@ function Projector:_failure(res)
   if self.fail_count >= self.cfg.fail_threshold and self.link ~= false then
     local was = self.link
     self.link = false
+    self:_log("warn", "marking projector offline after " .. self.fail_count .. " failed request(s) in a row")
     self:_set_state("OFFLINE")
     self:_emit("status", "Offline - projector not responding")
     self:_emit("link", false, was)
@@ -198,6 +205,7 @@ end
 --- Query power state, then the stable-state details, then reconcile intent.
 function Projector:poll()
   if self.polling then return end
+  self:_log("debug", "polling power state")
   self.polling = true
   self:_cancel_timer()
 
@@ -210,6 +218,7 @@ function Projector:poll()
     end
 
     self:_link_up()
+    self:_log("debug", "POWR? -> " .. tostring(res.value))
     local name = codec.parse_power(res.value)
     local new = name and POWER_TO_STATE[name]
     if not new then
@@ -403,6 +412,7 @@ function Projector:reconcile()
 end
 
 function Projector:_send_power(turn_on)
+  self:_log("info", "sending power " .. (turn_on and "on" or "off"))
   self.cmd_inflight = true
   self.client:request("POWR", turn_on and "1" or "0", function(res)
     self.cmd_inflight = false
@@ -424,6 +434,7 @@ function Projector:_send_power(turn_on)
 end
 
 function Projector:_send_input(code)
+  self:_log("info", "sending input select " .. tostring(code))
   self.cmd_inflight = true
   self.client:request("INPT", code, function(res)
     self.cmd_inflight = false

@@ -13,7 +13,7 @@ local Client = require "lib.pjl_client"
 local EpsonHttp = require "lib.epson_http"
 local Projector = require "lib.pjl_projector"
 
-DRIVER_VERSION = "1.0.1"
+DRIVER_VERSION = "1.0.2"
 
 local PROXY_ID = 5001
 local NET_ID = 6001
@@ -69,15 +69,68 @@ local function trim(s)
   return ((tostring(s or "")):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
-local function dbg(level, message)
-  local mode = Properties and Properties["Debug Mode"] or "Off"
-  if mode == "Off" then return end
-  local line = "[Epson " .. tostring(level) .. "] " .. tostring(message)
-  if mode == "Print" then
-    print(line)
-  elseif mode == "Log" then
-    C4:DebugLog(line)
+-- Logging -------------------------------------------------------------------------
+-- "Log Level" decides what is written; "Log Output" decides where (Lua tab output via
+-- print, the Director log via C4:DebugLog, or both). Warnings and errors are also kept in
+-- the read-only "Last Error" property so a problem is visible even with no log viewer open.
+
+local LOG_THRESHOLD = { Off = 0, Error = 1, Warning = 2, Info = 3, Debug = 4, Trace = 5 }
+local LOG_RANK = { error = 1, warn = 2, info = 3, event = 3, debug = 4, trace = 5 }
+local LOG_TAG = { error = "ERROR", warn = "WARN", info = "INFO", event = "EVENT",
+                  debug = "DEBUG", trace = "TRACE" }
+local PASSWORD_PROPS = {
+  ["PJLink Password"] = true, ["Web Control Password"] = true, ["Remote Password"] = true,
+}
+
+local gLastProblem = nil
+
+local function log_threshold()
+  local t = Properties and LOG_THRESHOLD[Properties["Log Level"] or ""]
+  if t == nil then return LOG_THRESHOLD.Info end
+  return t
+end
+
+local function log_output()
+  local m = Properties and Properties["Log Output"]
+  if m == "Print" or m == "Log" then return m end
+  return "Print and Log"
+end
+
+--- Printable form of wire data: control and high bytes escaped, long data cut.
+local function show(s, max)
+  s = tostring(s == nil and "" or s)
+  max = max or 300
+  local cut = ""
+  if #s > max then s = s:sub(1, max); cut = "..." end
+  s = s:gsub("\\", "\\\\"):gsub("\r", "\\r"):gsub("\n", "\\n")
+  s = s:gsub("[%z\1-\8\11\12\14-\31\127-\255]", function(c)
+    return string.format("\\x%02X", c:byte())
+  end)
+  return s .. cut
+end
+
+local function emit_line(line)
+  local mode = log_output()
+  if mode ~= "Log" then pcall(print, line) end
+  if mode ~= "Print" then
+    local ok = pcall(function() C4:DebugLog(line) end)
+    if not ok then pcall(function() C4:ErrorLog(line) end) end
   end
+end
+
+--- Log one line. level: error | warn | info | event | debug | trace.
+-- Never raises: a logging problem must not break projector control.
+local function dbg(level, message)
+  pcall(function()
+    local rank = LOG_RANK[level] or LOG_RANK.info
+    if rank <= LOG_RANK.warn and gLastProblem ~= message then
+      gLastProblem = message
+      C4:UpdateProperty("Last Error", tostring(message))
+    end
+    if rank > log_threshold() then return end
+    emit_line(string.format("%s [Epson %s] %s", os.date("%H:%M:%S"),
+      LOG_TAG[level] or tostring(level), tostring(message)))
+  end)
 end
 
 local function set_prop(name, value)
@@ -183,6 +236,7 @@ end
 local handlers = {}
 
 function handlers.state(new, prev)
+  dbg("info", "power state " .. tostring(prev) .. " -> " .. tostring(new))
   gState = new
   local label = STATE_LABEL[new] or tostring(new)
   set_prop("Power State", label)
@@ -212,6 +266,8 @@ end
 function handlers.input(code, prev)
   gInputCode = code
   local label = input_label(code)
+  dbg("info", "input " .. tostring(code) .. " (" .. label .. ")"
+    .. (prev ~= nil and (", was " .. tostring(prev)) or ""))
   set_prop("Current Input", label)
   set_var("CURRENT_INPUT", label)
   local binding = binding_for_code(code)
@@ -220,6 +276,7 @@ function handlers.input(code, prev)
 end
 
 function handlers.fault(active, text, prev)
+  dbg(active and "warn" or "info", "fault status: " .. tostring(text))
   gFaultActive = active
   set_prop("Fault Status", text)
   set_var("FAULT_STATUS", text)
@@ -231,6 +288,8 @@ function handlers.fault(active, text, prev)
 end
 
 function handlers.link(online, was)
+  dbg(online and "info" or "warn", "link " .. (online and "up" or "DOWN")
+    .. " (was " .. tostring(was) .. ")")
   gLink = online
   set_var("CONNECTED", online and "1" or "0")
   if online and was == false then
@@ -241,6 +300,7 @@ function handlers.link(online, was)
 end
 
 function handlers.lamp(hours)
+  dbg("debug", "light source hours " .. tostring(hours))
   gLampHours = hours
   set_prop("Light Source Hours", hours)
   set_var("LIGHT_SOURCE_HOURS", hours)
@@ -252,10 +312,12 @@ function handlers.lamp_alert(hours)
 end
 
 function handlers.status(text)
+  dbg("info", "connection status: " .. tostring(text))
   set_prop("Connection Status", text)
 end
 
 function handlers.info(model)
+  dbg("info", "projector model: " .. tostring(model))
   set_prop("Projector Model", model)
 end
 
@@ -305,16 +367,23 @@ local function make_timer(ms, fn)
 end
 
 local function web_get(url, headers, timeout_s, callback)
+  dbg("debug", "HTTP GET " .. url .. " (timeout " .. tostring(timeout_s) .. "s)")
   C4:url()
     :OnDone(function(_, responses, errCode, errMsg)
       if errCode == 0 and responses and #responses > 0 then
         local r = responses[#responses]
+        dbg("debug", "HTTP " .. tostring(r.code) .. " from " .. url)
+        dbg("trace", "HTTP body: " .. show(r.body, 400))
         callback({ code = r.code, headers = r.headers or {}, body = r.body })
       elseif errCode == 28 then
+        dbg("warn", "HTTP timeout after " .. tostring(timeout_s) .. "s: " .. url)
         callback({ err = "TIMEOUT", detail = tostring(errMsg) })
       elseif errCode == -1 then
+        dbg("warn", "HTTP connection closed: " .. url)
         callback({ err = "CLOSED" })
       else
+        dbg("warn", "HTTP request failed (code " .. tostring(errCode) .. ", "
+          .. tostring(errMsg) .. "): " .. url)
         callback({ err = "CONNECT", detail = tostring(errMsg) })
       end
     end)
@@ -337,6 +406,7 @@ local function build_stack()
 
   gMethod = wanted_method()
   gHost = nil -- force apply_config() to (re)connect
+  dbg("info", "control method: " .. (gMethod == "web" and WEB_METHOD or "PJLink"))
 
   if gMethod == "web" then
     gClient = EpsonHttp.new({
@@ -348,9 +418,19 @@ local function build_stack()
     })
   else
     gClient = Client.new({
-      connect = function(_, port) C4:NetConnect(NET_ID, port) end,
-      disconnect = function() C4:NetDisconnect(NET_ID, codec.PORT) end,
-      send = function(data) C4:SendToNetwork(NET_ID, codec.PORT, data) end,
+      connect = function(host, port)
+        dbg("debug", "NetConnect binding " .. NET_ID .. " (" .. tostring(host) .. ":" .. tostring(port) .. ")")
+        C4:NetConnect(NET_ID, port)
+      end,
+      disconnect = function()
+        dbg("debug", "NetDisconnect binding " .. NET_ID)
+        C4:NetDisconnect(NET_ID, codec.PORT)
+      end,
+      send = function(data)
+        -- length only: authenticated requests start with an MD5 of the password
+        dbg("trace", "SendToNetwork " .. #data .. " bytes")
+        C4:SendToNetwork(NET_ID, codec.PORT, data)
+      end,
       set_timer = make_timer, md5 = md5_hex, log = dbg,
     }, {
       port = codec.PORT,
@@ -369,6 +449,9 @@ end
 
 local function apply_config()
   local timeout = tonumber(Properties["Request Timeout (seconds)"]) or 5
+  dbg("info", "configuration: method=" .. gMethod .. " ip=" .. tostring(trim(Properties["IP Address"]))
+    .. " timeout=" .. tostring(timeout) .. "s idle poll="
+    .. tostring(Properties["Idle Polling Interval (seconds)"]) .. "s")
   gClient:set_timeouts(timeout * 1000, timeout * 1000)
   if gMethod == "web" then gClient:set_command_path(Properties["Web Command Path"]) end
 
@@ -382,6 +465,8 @@ local function apply_config()
     gHost = (ip ~= "") and ip or nil
     gProjector:stop()
     if gHost and gMethod == "pjlink" then
+      dbg("info", "creating TCP network connection " .. NET_ID .. " to " .. gHost
+        .. ":" .. tostring(codec.PORT))
       C4:CreateNetworkConnection(NET_ID, gHost, "TCP")
     end
     gClient:set_host(gHost)
@@ -391,6 +476,7 @@ local function apply_config()
     end
   end
   if not gHost then
+    dbg("warn", "IP Address property is empty - nothing to connect to")
     set_prop("Connection Status", "Set the IP Address property")
   end
 end
@@ -407,6 +493,8 @@ end
 
 function OnDriverLateInit()
   set_prop("Driver Version", DRIVER_VERSION)
+  dbg("info", "driver v" .. DRIVER_VERSION .. " starting; Log Level=" .. tostring(Properties["Log Level"])
+    .. ", Log Output=" .. tostring(Properties["Log Output"]))
   build_stack()
   gReady = true
   apply_config()
@@ -420,6 +508,19 @@ end
 local WEB_CREDENTIAL_PROPS = { ["Web Control Password"] = true, ["Remote Password"] = true }
 
 function OnPropertyChanged(property)
+  if property == "Log Level" or property == "Log Output" then
+    -- announce even when the new level would hide it, so the change is visible
+    local level = Properties["Log Level"]
+    if LOG_THRESHOLD[level or ""] ~= 0 then
+      emit_line(os.date("%H:%M:%S") .. " [Epson INFO] logging: level=" .. tostring(level)
+        .. ", output=" .. log_output())
+    end
+    return
+  end
+  if gReady then
+    dbg("info", "property '" .. tostring(property) .. "' changed"
+      .. (PASSWORD_PROPS[property] and "" or (" to '" .. tostring(Properties[property]) .. "'")))
+  end
   if not gReady then return end
   if property == "Control Method" then
     build_stack()
@@ -441,16 +542,34 @@ function OnPropertyChanged(property)
 end
 
 function OnConnectionStatusChanged(idBinding, nPort, strStatus)
-  if idBinding == NET_ID and gClient and gClient.on_status then gClient:on_status(strStatus) end
+  dbg("debug", "network status: binding=" .. tostring(idBinding) .. " port=" .. tostring(nPort)
+    .. " status=" .. tostring(strStatus))
+  if idBinding ~= NET_ID then
+    dbg("warn", "network status for unexpected binding " .. tostring(idBinding))
+  elseif gMethod ~= "pjlink" then
+    dbg("debug", "ignoring network status (control method is not PJLink)")
+  elseif gClient and gClient.on_status then
+    gClient:on_status(strStatus)
+  end
 end
 
 function ReceivedFromNetwork(idBinding, nPort, strData)
-  if idBinding == NET_ID and gClient and gClient.on_data then gClient:on_data(strData) end
+  dbg("trace", "network data: binding=" .. tostring(idBinding) .. " port=" .. tostring(nPort)
+    .. " " .. #tostring(strData) .. " bytes: " .. show(strData))
+  if idBinding ~= NET_ID then
+    dbg("warn", "network data for unexpected binding " .. tostring(idBinding))
+  elseif gMethod ~= "pjlink" then
+    dbg("debug", "ignoring network data (control method is not PJLink)")
+  elseif gClient and gClient.on_data then
+    gClient:on_data(strData)
+  end
 end
 
 function ReceivedFromProxy(idBinding, strCommand, tParams)
   if idBinding ~= PROXY_ID or not gProjector then return end
   tParams = tParams or {}
+  dbg("info", "proxy command " .. tostring(strCommand)
+    .. (tParams.INPUT and (" INPUT=" .. tostring(tParams.INPUT)) or ""))
 
   if strCommand == "ON" then
     gProjector:power_on()
@@ -459,6 +578,7 @@ function ReceivedFromProxy(idBinding, strCommand, tParams)
   elseif strCommand == "SET_INPUT" then
     local code = code_for_binding(tParams.INPUT)
     if code then
+      dbg("info", "SET_INPUT " .. tostring(tParams.INPUT) .. " -> code " .. tostring(code))
       gProjector:select_input(code)
     else
       dbg("warn", "SET_INPUT for unknown input " .. tostring(tParams.INPUT))
@@ -488,8 +608,11 @@ local ACTIONS = {
   TESTCONNECTION = function()
     gProjector:test(function(res)
       if res.ok then
+        dbg("info", "test connection OK, projector reports " .. tostring(res.value))
         set_prop("Last Test Result", "OK - projector reports " .. tostring(res.value))
       else
+        dbg("warn", "test connection failed: " .. tostring(res.err)
+          .. (res.detail and (" (" .. tostring(res.detail) .. ")") or ""))
         set_prop("Last Test Result", "Failed - " .. tostring(res.err))
       end
     end)
@@ -548,6 +671,7 @@ function ExecuteCommand(strCommand, tParams)
     name = tParams and tParams.ACTION
   end
   local fn = ACTIONS[normalize_command(name)]
+  dbg("info", "command " .. tostring(name))
   if fn then
     fn(tParams)
   else

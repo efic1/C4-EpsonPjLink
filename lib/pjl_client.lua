@@ -47,6 +47,18 @@ function Client:_log(level, msg)
   if self.env.log then self.env.log(level, msg) end
 end
 
+local FAIL_TEXT = {
+  CONNECT = "could not open a TCP connection - check the IP address, that PJLink is enabled on the projector, and that port 4352 is reachable",
+  TIMEOUT = "no reply in time",
+  CLOSED = "the projector closed the connection",
+  PROTOCOL = "the reply was not valid PJLink",
+  ERRA = "authentication failed - check the PJLink password",
+  ERR1 = "the projector does not know that command",
+  ERR2 = "the projector rejected the parameter",
+  ERR3 = "the projector cannot do that right now",
+  ERR4 = "the projector reports a failure",
+}
+
 function Client:_password()
   local p = self.password
   if type(p) == "function" then p = p() end
@@ -77,6 +89,7 @@ end
 
 function Client:set_host(host)
   if host ~= self.host then
+    self:_log("info", "PJLink host set to " .. tostring(host))
     self.host = host
     self:reset("CANCELLED")
   end
@@ -139,6 +152,8 @@ end
 
 --- Drop everything, close any open connection, fail queued callbacks.
 function Client:reset(reason)
+  self:_log("debug", "client reset (" .. tostring(reason) .. "), state=" .. self.state
+    .. ", dropping " .. #self.queue .. " queued request(s)")
   self:_disarm()
   local dropped = self.queue
   self.queue = {}
@@ -164,11 +179,15 @@ end
 -- Network events (forwarded by the owner) -------------------------------------
 
 function Client:on_status(status)
+  self:_log("debug", "socket " .. tostring(status) .. " (state=" .. self.state .. ")")
   if status == "ONLINE" then
     self.online = true
     if self.state == "connecting" then
       self.state = "greeting"
       self:_arm(self.response_timeout, function()
+        self:_log("warn", "connected to " .. tostring(self.host) .. ":" .. tostring(self.port)
+          .. " but no PJLink greeting arrived within " .. self.response_timeout
+          .. " ms (is PJLink enabled? is something else on that port?)")
         self:_finish({ ok = false, err = "TIMEOUT" })
       end)
     elseif self.state == "closing" then
@@ -191,7 +210,10 @@ function Client:on_status(status)
 end
 
 function Client:on_data(data)
-  if self.state ~= "greeting" and self.state ~= "awaiting" then return end
+  if self.state ~= "greeting" and self.state ~= "awaiting" then
+    self:_log("debug", "ignoring " .. #data .. " byte(s) received in state " .. self.state)
+    return
+  end
   self.buffer = self.buffer .. data
   while true do
     local line, rest = self.buffer:match("^(.-)\r(.*)$")
@@ -213,8 +235,12 @@ function Client:_pump()
   self.state = "connecting"
   self.buffer = ""
   self.online = false
+  self:_log("debug", "opening connection to " .. tostring(self.host) .. ":" .. tostring(self.port)
+    .. " for " .. tostring(job.body) .. " (" .. #self.queue .. " queued)")
   self:_arm(self.connect_timeout, function()
     -- the connect may still complete later: cancel it and wait for the close
+    self:_log("warn", "no connection to " .. tostring(self.host) .. ":" .. tostring(self.port)
+      .. " within " .. self.connect_timeout .. " ms")
     self:_finish({ ok = false, err = "CONNECT" }, true)
   end)
   self.env.connect(self.host, self.port)
@@ -226,22 +252,29 @@ function Client:_on_line(line)
 
   if self.state == "greeting" then
     local greeting = codec.parse_greeting(line)
+    self:_log("debug", "<- greeting: " .. line)
     if not greeting then
+      self:_log("warn", "unexpected greeting (not PJLink?): " .. line)
       return self:_finish({ ok = false, err = "PROTOCOL" })
     end
     if greeting.err then
+      self:_log("warn", "projector refused the connection: " .. line)
       return self:_finish({ ok = false, err = greeting.err })
     end
     local prefix = ""
     if greeting.auth then
       local password = self:_password()
       if password == "" then
+        self:_log("warn", "projector requires a PJLink password but the PJLink Password property is empty")
         return self:_finish({ ok = false, err = "ERRA", detail = "password required" })
       end
+      self:_log("debug", "projector requires authentication; sending credentials")
       prefix = codec.auth_prefix(greeting.salt, password, self.env.md5)
     end
     self.state = "awaiting"
     self:_arm(self.response_timeout, function()
+      self:_log("warn", "no reply to " .. job.line:gsub("\r", "") .. " within "
+        .. self.response_timeout .. " ms")
       self:_finish({ ok = false, err = "TIMEOUT" })
     end)
     self:_log("debug", "-> " .. job.line:gsub("\r", ""))
@@ -249,13 +282,18 @@ function Client:_on_line(line)
   elseif self.state == "awaiting" then
     self:_log("debug", "<- " .. line)
     if line:upper() == "PJLINK ERRA" then
+      self:_log("warn", "projector rejected the PJLink password")
       return self:_finish({ ok = false, err = "ERRA" })
     end
     local res = codec.parse_response(line)
     if not res then
+      self:_log("warn", "could not parse reply: " .. line)
       return self:_finish({ ok = false, err = "PROTOCOL" })
     end
-    if res.body ~= job.body then return end -- stray line, keep waiting
+    if res.body ~= job.body then
+      self:_log("debug", "ignoring reply for " .. tostring(res.body) .. " while waiting for " .. job.body)
+      return
+    end -- stray line, keep waiting
     if res.err then
       return self:_finish({ ok = false, err = res.err })
     end
@@ -278,6 +316,14 @@ function Client:_finish(res, force_close)
     return
   end
   local job = table.remove(self.queue, 1)
+  if job then
+    if res.ok then
+      self:_log("debug", job.body .. " ok: " .. tostring(res.value))
+    else
+      self:_log("debug", job.body .. " failed: " .. tostring(res.err) .. " - "
+        .. (FAIL_TEXT[res.err] or "see log above"))
+    end
+  end
   self:_disarm()
   self.state = "closing"
 

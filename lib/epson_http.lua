@@ -168,8 +168,15 @@ function Client:_pump()
   job.started = true
   self.state = "running"
   local generation = self.generation or 0
+  self:_log("debug", "web request " .. job.line .. " (" .. #self.queue .. " queued)")
   self:_execute(job, function(res)
     if (self.generation or 0) ~= generation then return end -- reset while in flight
+    if res.ok then
+      self:_log("debug", job.line .. " ok: " .. tostring(res.value))
+    else
+      self:_log("debug", job.line .. " failed: " .. tostring(res.err)
+        .. (res.detail and (" (" .. tostring(res.detail) .. ")") or ""))
+    end
     self:_finish(res)
   end)
 end
@@ -251,8 +258,13 @@ function Client:_fetch(path, query, cb, attempt)
       local fresh = digest.parse_challenge(digest.header(r.headers, "www-authenticate"))
       if not fresh or pass == "" or attempt >= 1 then
         self.challenges[user] = nil
+        self:_log("warn", "web control rejected user " .. user .. " (HTTP 401): "
+          .. (pass == "" and "the matching password property is empty"
+              or (not fresh) and "no usable Digest challenge in the reply"
+              or "wrong password?"))
         return cb({ err = "ERRA", code = 401 })
       end
+      self:_log("debug", "HTTP 401 for user " .. user .. ", retrying with Digest credentials")
       fresh.nc = 0
       self.challenges[user] = fresh
       return self:_fetch(path, query, cb, attempt + 1)
@@ -269,6 +281,10 @@ local function http_error(r)
   return "PROTOCOL"
 end
 
+function Client:_http_failed(r, what)
+  self:_log("warn", "unexpected HTTP " .. tostring(r.code) .. " for " .. what)
+end
+
 function Client:_execute(job, done)
   local plan = cmds.plan(job.body, job.param, self.cfg())
 
@@ -282,10 +298,15 @@ function Client:_execute(job, done)
     local query = "jsoncallback=" .. cmds.urlenc(plan.query)
     return self:_fetch(cmds.QUERY_PATH, query, function(r)
       if r.err then return done({ ok = false, err = r.err }) end
-      if r.code ~= 200 then return done({ ok = false, err = http_error(r) }) end
+      if r.code ~= 200 then
+        self:_http_failed(r, "query " .. tostring(plan.query))
+        return done({ ok = false, err = http_error(r) })
+      end
       local reply, is_error = cmds.parse_json_reply(r.body)
       if reply == nil and not is_error then
         -- an HTML error page (for example the missing-Referer 403 page) is not a JSON reply
+        self:_log("warn", "reply to query " .. tostring(plan.query) .. " was not JSON: "
+          .. tostring(r.body):sub(1, 120):gsub("%s+", " "))
         return done({ ok = false, err = "PROTOCOL" })
       end
       if is_error or reply == nil then return done({ ok = false, err = "ERR3" }) end
@@ -306,8 +327,13 @@ function Client:_execute(job, done)
     local param = cmds.encode_param(commands[index])
     self:_fetch(self.command_path, param, function(r)
       if r.err then return done({ ok = false, err = r.err }) end
-      if r.code ~= 200 then return done({ ok = false, err = http_error(r) }) end
+      if r.code ~= 200 then
+        self:_http_failed(r, "command " .. tostring(commands[index]))
+        return done({ ok = false, err = http_error(r) })
+      end
       if tostring(r.body):find("403 Forbidden", 1, true) then
+        self:_log("warn", "command " .. tostring(commands[index])
+          .. " was rejected (403 Forbidden): missing Referer or wrong Web Command Path")
         return done({ ok = false, err = "PROTOCOL", detail = "rejected: missing Referer or wrong path" })
       end
       if index >= #commands then return done({ ok = true, value = "OK" }) end
